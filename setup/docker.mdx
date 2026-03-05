@@ -1,0 +1,481 @@
+---
+title: Docker Deployment
+description: Run MoneyPrinter frontend, API, worker, and Postgres with Docker Compose.
+---
+
+# Docker Deployment
+
+Deploy the complete MoneyPrinter stack (frontend, API, worker, Postgres) using Docker Compose.
+
+## Prerequisites
+
+- **Docker**: 20.10+
+- **Docker Compose**: 2.0+
+- **Ollama**: Running on host machine or accessible remotely
+
+Verify Docker installation:
+
+```bash
+docker --version
+docker compose version
+```
+
+## Quick Start
+
+<Steps>
+  <Step title="Prepare environment file">
+    ```bash
+    cp .env.example .env
+    ```
+
+    Edit `.env` and set required keys:
+
+    ```bash .env
+    TIKTOK_SESSION_ID="your_session_id"
+    PEXELS_API_KEY="your_api_key"
+    ```
+  </Step>
+
+  <Step title="Configure Ollama connectivity">
+    By default, Docker backend expects Ollama on the host machine:
+
+    ```bash .env
+    OLLAMA_BASE_URL="http://host.docker.internal:11434"
+    ```
+
+    Ensure Ollama is running on your host:
+
+    ```bash
+    ollama serve
+    ollama pull llama3.1:8b
+    ```
+  </Step>
+
+  <Step title="Start services">
+    ```bash
+    docker compose up --build
+    ```
+
+    This starts:
+    - **postgres** on port 5432
+    - **backend** on port 8080
+    - **worker** (no exposed port)
+    - **frontend** on port 8001
+  </Step>
+
+  <Step title="Access the application">
+    - **Frontend**: [http://localhost:8001](http://localhost:8001)
+    - **Backend API**: [http://localhost:8080](http://localhost:8080)
+    - **Postgres**: `localhost:5432`
+  </Step>
+</Steps>
+
+## Docker Compose Configuration
+
+### Service Architecture
+
+```yaml docker-compose.yml
+version: "3"
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: "postgres"
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-moneyprinter}
+      - POSTGRES_USER=${POSTGRES_USER:-moneyprinter}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-moneyprinter}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-moneyprinter} -d ${POSTGRES_DB:-moneyprinter}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: always
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: "backend"
+    ports:
+      - "8080:8080"
+    command: ["python3", "backend/main.py"]
+    volumes:
+      - ./files:/temp
+      - ./Backend:/app/backend
+      - ./fonts:/app/fonts
+    environment:
+      - TIKTOK_SESSION_ID=${TIKTOK_SESSION_ID}
+      - PEXELS_API_KEY=${PEXELS_API_KEY}
+      - IMAGEMAGICK_BINARY=/usr/local/bin/magick
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.1:8b}
+      - DATABASE_URL=${DATABASE_URL:-postgresql+psycopg://moneyprinter:moneyprinter@postgres:5432/moneyprinter}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - postgres
+    restart: always
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: "worker"
+    command: ["python3", "backend/worker.py"]
+    volumes:
+      - ./files:/temp
+      - ./Backend:/app/backend
+      - ./fonts:/app/fonts
+    environment:
+      - TIKTOK_SESSION_ID=${TIKTOK_SESSION_ID}
+      - PEXELS_API_KEY=${PEXELS_API_KEY}
+      - IMAGEMAGICK_BINARY=/usr/local/bin/magick
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.1:8b}
+      - DATABASE_URL=${DATABASE_URL:-postgresql+psycopg://moneyprinter:moneyprinter@postgres:5432/moneyprinter}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - postgres
+      - backend
+    restart: always
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: "frontend"
+    ports:
+      - "8001:8001"
+    command: ["python3", "-m", "http.server", "8001", "--directory", "frontend"]
+    volumes:
+      - ./Frontend:/app/frontend
+    restart: always
+
+volumes:
+  postgres_data:
+```
+
+### Ollama Connectivity
+
+The `extra_hosts` configuration allows containers to reach the host machine:
+
+```yaml
+extra_hosts:
+  - "host.docker.internal:host-gateway"
+```
+
+This works on:
+- **macOS**: Native Docker Desktop support
+- **Windows**: Native Docker Desktop support
+- **Linux**: Mapped via `host-gateway`
+
+<Accordion title="Alternative: Ollama in Docker">
+Run Ollama as a Docker container:
+
+```yaml docker-compose.yml
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: always
+
+volumes:
+  ollama_data:
+```
+
+Update `.env`:
+
+```bash
+OLLAMA_BASE_URL="http://ollama:11434"
+```
+
+Pull models:
+
+```bash
+docker exec -it ollama ollama pull llama3.1:8b
+```
+</Accordion>
+
+## Verify Deployment
+
+### Check service status
+
+```bash
+docker compose ps
+```
+
+Expected output:
+
+```
+NAME        IMAGE                COMMAND                  STATUS         PORTS
+backend     moneyprinter-backend "python3 backend/main.py" Up 2 minutes   0.0.0.0:8080->8080/tcp
+frontend    moneyprinter-frontend "python3 -m http.server" Up 2 minutes   0.0.0.0:8001->8001/tcp
+postgres    postgres:16-alpine   "docker-entrypoint.s..." Up 2 minutes   0.0.0.0:5432->5432/tcp
+worker      moneyprinter-worker  "python3 backend/worker.py" Up 2 minutes
+```
+
+### Test API endpoints
+
+```bash
+# List Ollama models
+curl http://localhost:8080/api/models
+```
+
+Expected response:
+
+```json
+{
+  "status": "success",
+  "models": ["llama3.1:8b", "mistral:7b"],
+  "default": "llama3.1:8b"
+}
+```
+
+### Queue a test job
+
+```bash
+curl -X POST http://localhost:8080/api/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "videoSubject": "AI business ideas",
+    "aiModel": "llama3.1:8b",
+    "voice": "en_us_001",
+    "paragraphNumber": 1,
+    "customPrompt": ""
+  }'
+```
+
+Expected response:
+
+```json
+{
+  "status": "success",
+  "message": "Video generation queued.",
+  "jobId": "abc123-def456-..."
+}
+```
+
+### Check job status
+
+```bash
+curl http://localhost:8080/api/jobs/<jobId>
+```
+
+### View job events
+
+```bash
+curl "http://localhost:8080/api/jobs/<jobId>/events?after=0"
+```
+
+## Manage Services
+
+### View logs
+
+```bash
+# All services
+docker compose logs -f
+
+# Specific service
+docker compose logs -f backend
+docker compose logs -f worker
+```
+
+### Restart services
+
+```bash
+# All services
+docker compose restart
+
+# Specific service
+docker compose restart worker
+```
+
+### Stop services
+
+```bash
+docker compose down
+```
+
+### Stop and remove volumes
+
+<Warning>
+This deletes all job data and Postgres content.
+</Warning>
+
+```bash
+docker compose down -v
+```
+
+## Production Considerations
+
+### Security
+
+1. **Change default database password**:
+
+```bash .env
+POSTGRES_PASSWORD="your_strong_password_here"
+DATABASE_URL="postgresql+psycopg://moneyprinter:your_strong_password_here@postgres:5432/moneyprinter"
+```
+
+2. **Use secrets for API keys** (Docker Swarm/Kubernetes):
+
+```yaml docker-compose.yml
+secrets:
+  tiktok_session:
+    external: true
+  pexels_key:
+    external: true
+
+services:
+  backend:
+    secrets:
+      - tiktok_session
+      - pexels_key
+```
+
+3. **Enable HTTPS** with a reverse proxy (Nginx, Traefik, Caddy).
+
+### Resource Limits
+
+Set CPU and memory limits:
+
+```yaml docker-compose.yml
+services:
+  worker:
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'
+          memory: 8G
+        reservations:
+          cpus: '2.0'
+          memory: 4G
+```
+
+### Persistent Storage
+
+Mount output directory to host:
+
+```yaml docker-compose.yml
+services:
+  worker:
+    volumes:
+      - ./output:/app/output
+      - ./temp:/temp
+```
+
+### Scaling Workers
+
+Run multiple worker instances:
+
+```bash
+docker compose up --scale worker=3
+```
+
+Or define in `docker-compose.yml`:
+
+```yaml
+services:
+  worker:
+    deploy:
+      replicas: 3
+```
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Ollama connection refused">
+    **Check Ollama is running on host**:
+
+    ```bash
+    ollama serve
+    ```
+
+    **Test connectivity from container**:
+
+    ```bash
+    docker exec -it backend curl http://host.docker.internal:11434/api/tags
+    ```
+
+    **Linux-specific**: Ensure `host.docker.internal` resolves:
+
+    ```bash
+    docker exec -it backend ping host.docker.internal
+    ```
+  </Accordion>
+
+  <Accordion title="Postgres healthcheck failing">
+    **Check logs**:
+
+    ```bash
+    docker compose logs postgres
+    ```
+
+    **Verify database credentials match** between:
+    - `.env` file
+    - `docker-compose.yml` environment variables
+    - `DATABASE_URL` connection string
+  </Accordion>
+
+  <Accordion title="Worker not processing jobs">
+    **Check worker logs**:
+
+    ```bash
+    docker compose logs -f worker
+    ```
+
+    **Verify worker can connect to Postgres**:
+
+    ```bash
+    docker exec -it worker env | grep DATABASE_URL
+    ```
+
+    **Ensure backend started first** (worker depends on backend).
+  </Accordion>
+
+  <Accordion title="Permission errors writing output files">
+    **Fix volume permissions**:
+
+    ```bash
+    chmod -R 777 ./files
+    chmod -R 777 ./temp
+    ```
+
+    Or run containers as your user:
+
+    ```yaml docker-compose.yml
+    services:
+      worker:
+        user: "1000:1000"  # Your UID:GID
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Generating Videos" icon="video" href="/guides/generating-videos">
+    Create videos through UI and API
+  </Card>
+  
+  <Card title="Job Queue" icon="list" href="/concepts/job-queue">
+    Understand the database-backed queue system
+  </Card>
+  
+  <Card title="Architecture" icon="sitemap" href="/concepts/architecture">
+    Learn the complete system design
+  </Card>
+  
+  <Card title="Troubleshooting" icon="wrench" href="/development/troubleshooting">
+    Common Docker issues
+  </Card>
+</CardGroup>

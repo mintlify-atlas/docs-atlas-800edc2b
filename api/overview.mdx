@@ -1,0 +1,144 @@
+---
+title: API Overview
+description: Overview of the MoneyPrinter REST API
+---
+
+## Introduction
+
+The MoneyPrinter API is a REST API for automated video generation. It provides endpoints for creating video generation jobs, monitoring their progress, and managing background music uploads.
+
+## Base URL
+
+The API server runs locally on:
+
+```
+http://localhost:8080
+```
+
+All API endpoints are prefixed with `/api`.
+
+## Authentication
+
+Currently, the API does not require authentication. All endpoints are publicly accessible on the local server.
+
+## Request Format
+
+The API accepts JSON request bodies for POST endpoints:
+
+```bash
+curl -X POST http://localhost:8080/api/generate \
+  -H "Content-Type: application/json" \
+  -d '{"videoSubject": "AI technology", "voice": "en_us_001"}'
+```
+
+For file uploads, use `multipart/form-data`:
+
+```bash
+curl -X POST http://localhost:8080/api/upload-songs \
+  -F "songs=@song1.mp3" \
+  -F "songs=@song2.mp3"
+```
+
+## Response Format
+
+All API responses follow a consistent JSON structure with a `status` field:
+
+### Success Response
+
+```json
+{
+  "status": "success",
+  "message": "Operation completed successfully",
+  // ... additional fields
+}
+```
+
+### Error Response
+
+```json
+{
+  "status": "error",
+  "message": "Error description"
+}
+```
+
+## HTTP Status Codes
+
+The API uses standard HTTP status codes:
+
+- `200` - Success
+- `400` - Bad Request (missing required fields, invalid input)
+- `404` - Not Found (job or resource doesn't exist)
+- `500` - Internal Server Error
+
+## Job-Based Workflow
+
+Video generation is asynchronous and follows a job-based workflow:
+
+1. **Submit a job** via `POST /api/generate` - Returns a `jobId`
+2. **Poll job status** via `GET /api/jobs/:id` - Check state (queued, running, completed, failed)
+3. **Stream events** via `GET /api/jobs/:id/events` - Get real-time progress updates
+4. **Cancel if needed** via `POST /api/jobs/:id/cancel` - Request job cancellation
+5. **Retrieve result** from the `resultPath` field when state is `completed`
+
+## Common Use Cases
+
+### Generate a Video
+
+```python
+import requests
+
+# Submit generation job
+response = requests.post(
+    "http://localhost:8080/api/generate",
+    json={
+        "videoSubject": "The history of space exploration",
+        "voice": "en_us_001",
+        "paragraphNumber": 3
+    }
+)
+job_id = response.json()["jobId"]
+
+# Poll for completion
+import time
+while True:
+    status = requests.get(f"http://localhost:8080/api/jobs/{job_id}")
+    job = status.json()["job"]
+    
+    if job["state"] == "completed":
+        print(f"Video ready at: {job['resultPath']}")
+        break
+    elif job["state"] == "failed":
+        print(f"Error: {job['errorMessage']}")
+        break
+    
+    time.sleep(2)
+```
+
+### Monitor Real-Time Progress
+
+```python
+import requests
+
+last_event_id = 0
+while True:
+    response = requests.get(
+        f"http://localhost:8080/api/jobs/{job_id}/events",
+        params={"after": last_event_id}
+    )
+    
+    events = response.json()["events"]
+    for event in events:
+        print(f"[{event['level']}] {event['message']}")
+        last_event_id = event["id"]
+    
+    time.sleep(1)
+```
+
+## Rate Limiting
+
+There is currently no rate limiting implemented. However, jobs are processed sequentially by the worker process.
+
+## CORS
+
+CORS is enabled for all origins, allowing the frontend to communicate with the API.

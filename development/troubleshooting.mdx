@@ -1,0 +1,652 @@
+---
+title: Troubleshooting
+description: Common issues and solutions for MoneyPrinter installation, configuration, and usage.
+---
+
+# Troubleshooting
+
+Quick solutions for common MoneyPrinter issues.
+
+## Installation Issues
+
+### Python Version Too Old
+
+**Error**:
+
+```
+requires-python >=3.11
+```
+
+**Solution**:
+
+Upgrade to Python 3.11 or higher:
+
+<CodeGroup>
+```bash Ubuntu/Debian
+sudo apt update
+sudo apt install python3.11
+```
+
+```bash macOS
+brew install python@3.11
+```
+
+```bash Windows
+# Download from python.org
+```
+</CodeGroup>
+
+Verify:
+
+```bash
+python --version
+# or
+python3.11 --version
+```
+
+### uv Sync Fails
+
+**Error**:
+
+```
+Failed to download distribution
+```
+
+**Solutions**:
+
+1. Check internet connection
+2. Clear uv cache:
+   ```bash
+   rm -rf ~/.cache/uv
+   uv sync
+   ```
+3. Use verbose mode:
+   ```bash
+   uv sync -v
+   ```
+
+### FFmpeg Not Found
+
+**Error**:
+
+```
+FileNotFoundError: [Errno 2] No such file or directory: 'ffmpeg'
+```
+
+**Solution**:
+
+Install FFmpeg:
+
+<CodeGroup>
+```bash Ubuntu/Debian
+sudo apt install ffmpeg
+```
+
+```bash macOS
+brew install ffmpeg
+```
+
+```bash Windows
+choco install ffmpeg
+```
+</CodeGroup>
+
+Verify:
+
+```bash
+ffmpeg -version
+```
+
+### ImageMagick Not Detected
+
+**Error**:
+
+```
+ERROR: IMAGEMAGICK_BINARY is not set and no ImageMagick executable was detected in PATH.
+```
+
+**Solution**:
+
+Install ImageMagick:
+
+<CodeGroup>
+```bash Ubuntu/Debian
+sudo apt install imagemagick
+```
+
+```bash macOS
+brew install imagemagick
+```
+
+```bash Windows
+# Download from https://imagemagick.org/script/download.php
+```
+</CodeGroup>
+
+If still not detected, set explicit path in `.env`:
+
+<CodeGroup>
+```bash Linux/macOS
+IMAGEMAGICK_BINARY="/usr/local/bin/magick"
+```
+
+```bash Windows
+IMAGEMAGICK_BINARY="C:\\Program Files\\ImageMagick-7.1.1-Q16-HDRI\\magick.exe"
+```
+</CodeGroup>
+
+<Warning>
+Windows paths require double backslashes (`\\`).
+</Warning>
+
+## Configuration Issues
+
+### Missing Environment Variables
+
+**Error**:
+
+```
+ERROR: The following environment variables are missing: PEXELS_API_KEY, TIKTOK_SESSION_ID
+```
+
+**Solution**:
+
+Edit `.env` and add required values:
+
+```bash .env
+TIKTOK_SESSION_ID="your_session_id_here"
+PEXELS_API_KEY="your_pexels_key_here"
+```
+
+See [Configuration Guide](/setup/configuration) for how to obtain these.
+
+### TikTok Session Expired
+
+**Error**:
+
+```
+TTS failed: 401 Unauthorized
+```
+
+**Solution**:
+
+TikTok session IDs expire. Refresh:
+
+1. Log into TikTok in your browser
+2. Open Developer Tools (F12)
+3. Go to Application → Cookies
+4. Copy new `sessionid` value
+5. Update `.env`:
+   ```bash
+   TIKTOK_SESSION_ID="new_session_id_here"
+   ```
+
+### Pexels API Key Invalid
+
+**Error**:
+
+```
+No videos found to download.
+```
+
+**Solution**:
+
+1. Verify API key at [pexels.com/api](https://www.pexels.com/api/)
+2. Check quota (200 requests/hour on free tier)
+3. Try a broader search term
+4. Update `.env` with valid key
+
+## Ollama Issues
+
+### No Ollama Models in Dropdown
+
+**Symptoms**:
+- Frontend dropdown is empty
+- No models shown in UI
+
+**Solutions**:
+
+1. **Ensure Ollama is running**:
+   ```bash
+   ollama serve
+   ```
+
+2. **Check models are installed**:
+   ```bash
+   ollama list
+   ```
+
+3. **Pull a model if needed**:
+   ```bash
+   ollama pull llama3.1:8b
+   ```
+
+4. **Verify OLLAMA_BASE_URL**:
+   ```bash .env
+   OLLAMA_BASE_URL="http://localhost:11434"
+   ```
+
+5. **Test connectivity**:
+   ```bash
+   curl http://localhost:11434/api/tags
+   ```
+
+### Model Not Found Error
+
+**Error**:
+
+```
+RuntimeError: Ollama model 'llama3.1:8b' is not installed.
+Available models: mistral:7b
+Install it with: ollama pull llama3.1:8b
+```
+
+**Solution**:
+
+Pull the requested model:
+
+```bash
+ollama pull llama3.1:8b
+```
+
+Or use an installed model:
+
+```bash .env
+OLLAMA_MODEL="mistral:7b"
+```
+
+### Ollama Connection Refused
+
+**Error**:
+
+```
+Failed to connect to Ollama: Connection refused
+```
+
+**Solutions**:
+
+1. **Start Ollama**:
+   ```bash
+   ollama serve
+   ```
+
+2. **Check if running**:
+   ```bash
+   curl http://localhost:11434/api/tags
+   ```
+
+3. **If using Docker**, verify `OLLAMA_BASE_URL`:
+   ```bash .env
+   OLLAMA_BASE_URL="http://host.docker.internal:11434"
+   ```
+
+4. **Test from container**:
+   ```bash
+   docker exec -it backend curl http://host.docker.internal:11434/api/tags
+   ```
+
+## Video Generation Issues
+
+### Job Stays in Queued State
+
+**Symptoms**:
+- Job never starts processing
+- Status remains "queued"
+
+**Solutions**:
+
+1. **Ensure worker is running**:
+   ```bash
+   uv run python Backend/worker.py
+   ```
+
+2. **Check worker logs** for errors
+
+3. **Verify database connectivity**:
+   ```bash
+   sqlite3 moneyprinter.db "SELECT * FROM generation_jobs;"
+   ```
+
+4. **Restart worker**:
+   ```bash
+   # Ctrl+C to stop
+   uv run python Backend/worker.py
+   ```
+
+### No Stock Videos Found
+
+**Error**:
+
+```
+RuntimeError: No videos found to download.
+```
+
+**Solutions**:
+
+1. **Verify PEXELS_API_KEY** in `.env`
+2. **Try a broader video subject**
+3. **Check Pexels quota** (200 requests/hour)
+4. **Use a different search term**
+
+### Subtitle Rendering Error
+
+**Error**:
+
+```
+RuntimeError: Could not render final video. Check subtitle/font/ImageMagick setup.
+```
+
+**Solutions**:
+
+1. **Ensure ImageMagick is installed**:
+   ```bash
+   magick --version
+   ```
+
+2. **Set IMAGEMAGICK_BINARY** in `.env` if not auto-detected
+
+3. **Check font file exists**:
+   ```bash
+   ls -la fonts/bold_font.ttf
+   ```
+
+4. **ImageMagick policy error** (Linux):
+   Edit `/etc/ImageMagick-7/policy.xml` and comment out:
+   ```xml
+   <!-- <policy domain="path" rights="none" pattern="@*" /> -->
+   ```
+
+### TTS Generation Fails
+
+**Error**:
+
+```
+TikTok TTS failed
+```
+
+**Solutions**:
+
+1. **Check TIKTOK_SESSION_ID** is valid
+2. **Refresh session ID** (see above)
+3. **Try a different voice**
+4. **Check for special characters** in script
+5. **Verify internet connection**
+
+### Out of Memory Error
+
+**Error**:
+
+```
+Killed
+Out of memory
+```
+
+**Solutions**:
+
+1. **Use smaller Ollama model**:
+   ```bash
+   ollama pull mistral:7b
+   ```
+
+2. **Reduce render threads**:
+   ```json
+   {"threads": 2}
+   ```
+
+3. **Close other applications**
+
+4. **Add swap space** (Linux):
+   ```bash
+   sudo fallocate -l 8G /swapfile
+   sudo chmod 600 /swapfile
+   sudo mkswap /swapfile
+   sudo swapon /swapfile
+   ```
+
+## Docker Issues
+
+### Ollama Connection Refused (Docker)
+
+**Error**:
+
+```
+Failed to connect to Ollama: Connection refused
+```
+
+**Solutions**:
+
+1. **Ensure Ollama runs on host**:
+   ```bash
+   ollama serve
+   ```
+
+2. **Verify OLLAMA_BASE_URL**:
+   ```bash .env
+   OLLAMA_BASE_URL="http://host.docker.internal:11434"
+   ```
+
+3. **Test connectivity**:
+   ```bash
+   docker exec -it backend curl http://host.docker.internal:11434/api/tags
+   ```
+
+4. **Linux**: Check `host.docker.internal` resolves:
+   ```bash
+   docker exec -it backend ping host.docker.internal
+   ```
+
+### Postgres Healthcheck Failing
+
+**Error**:
+
+```
+postgres healthcheck failed
+```
+
+**Solutions**:
+
+1. **Check logs**:
+   ```bash
+   docker compose logs postgres
+   ```
+
+2. **Verify credentials** match:
+   - `.env` file
+   - `docker-compose.yml`
+   - `DATABASE_URL`
+
+3. **Restart services**:
+   ```bash
+   docker compose down
+   docker compose up
+   ```
+
+### Worker Not Processing Jobs (Docker)
+
+**Symptoms**:
+- Worker container running
+- Jobs stay queued
+
+**Solutions**:
+
+1. **Check worker logs**:
+   ```bash
+   docker compose logs -f worker
+   ```
+
+2. **Verify DATABASE_URL**:
+   ```bash
+   docker exec -it worker env | grep DATABASE_URL
+   ```
+
+3. **Ensure backend started first**:
+   ```bash
+   docker compose up backend
+   # Wait for "Running on http://0.0.0.0:8080"
+   docker compose up worker
+   ```
+
+### Permission Errors (Docker)
+
+**Error**:
+
+```
+PermissionError: [Errno 13] Permission denied: '/temp/output.mp4'
+```
+
+**Solutions**:
+
+1. **Fix volume permissions**:
+   ```bash
+   chmod -R 777 ./files
+   chmod -R 777 ./temp
+   ```
+
+2. **Run as your user**:
+   ```yaml docker-compose.yml
+   services:
+     worker:
+       user: "1000:1000"  # Your UID:GID
+   ```
+
+## YouTube Upload Issues
+
+### OAuth Consent Screen Not Approved
+
+**Error**:
+
+```
+Error 403: access_denied
+```
+
+**Solution**:
+
+Add your Google account to **Test Users** in Google Cloud Console:
+
+1. Go to **OAuth consent screen**
+2. Under **Test users**, click **Add Users**
+3. Add your email
+4. Save
+
+### Quota Exceeded
+
+**Error**:
+
+```
+HttpError 403: quotaExceeded
+```
+
+**Cause**: YouTube Data API free tier: 10,000 units/day (~6 uploads)
+
+**Solutions**:
+
+1. **Wait 24 hours** for quota reset
+2. **Request quota increase** in Google Cloud Console
+3. **Use multiple projects**
+
+### Token Expired
+
+**Error**:
+
+```
+HttpError 401: invalid_grant
+Token has been expired or revoked.
+```
+
+**Solution**:
+
+Delete OAuth token and re-authenticate:
+
+```bash
+rm Backend/main.py-oauth2.json
+# Next upload will trigger re-auth
+```
+
+## Frontend Issues
+
+### Cannot Connect to Backend
+
+**Symptoms**:
+- Frontend loads but API calls fail
+- Console errors
+
+**Solutions**:
+
+1. **Ensure backend is running**:
+   ```bash
+   uv run python Backend/main.py
+   ```
+
+2. **Check backend is on port 8080**:
+   ```bash
+   curl http://localhost:8080/api/models
+   ```
+
+3. **Open frontend via local server**, not file://:
+   ```bash
+   # Correct:
+   python3 -m http.server 3000 --directory Frontend
+   # Open http://localhost:3000
+   
+   # Wrong:
+   # Opening Frontend/index.html directly
+   ```
+
+4. **Check CORS** if using different ports
+
+### Progress Not Updating
+
+**Symptoms**:
+- Job starts but no progress logs
+- Frontend stuck
+
+**Solutions**:
+
+1. **Check browser console** for errors
+2. **Verify worker is running**
+3. **Check events endpoint**:
+   ```bash
+   curl "http://localhost:8080/api/jobs/<jobId>/events?after=0"
+   ```
+4. **Refresh page** and check job status
+
+## Getting Help
+
+<CardGroup cols={2}>
+  <Card title="GitHub Issues" icon="github" href="https://github.com/FujiwaraChoki/MoneyPrinter/issues">
+    Search existing issues or open a new one
+  </Card>
+  
+  <Card title="Discord Community" icon="discord" href="https://dsc.gg/fuji-community">
+    Ask questions in the community server
+  </Card>
+  
+  <Card title="Documentation" icon="book" href="/">
+    Read the complete documentation
+  </Card>
+  
+  <Card title="Configuration Guide" icon="gear" href="/setup/configuration">
+    Review all configuration options
+  </Card>
+</CardGroup>
+
+## Before Opening an Issue
+
+Check these first:
+
+- [ ] Searched existing issues
+- [ ] Using Python 3.11+
+- [ ] All dependencies installed
+- [ ] Required environment variables set
+- [ ] Ollama is running
+- [ ] Worker is running
+- [ ] Checked logs for errors
+
+Include in your issue:
+
+1. **MoneyPrinter version** (git commit hash)
+2. **Operating system** and version
+3. **Python version**: `python --version`
+4. **Error message** (full traceback)
+5. **Steps to reproduce**
+6. **Configuration** (`.env` with secrets redacted)

@@ -1,0 +1,298 @@
+---
+title: Script Generation
+description: AI-powered script generation using Ollama models
+icon: sparkles
+---
+
+MoneyPrinter uses Ollama to generate video scripts using local LLMs. The script generation pipeline creates engaging, formatted content based on user-provided topics.
+
+## Core Function
+
+The main script generation is handled by `generate_script()` in `Backend/gpt.py`:
+
+```python
+def generate_script(
+    video_subject: str,
+    paragraph_number: int,
+    ai_model: str,
+    voice: str,
+    customPrompt: str,
+) -> Optional[str]:
+    """
+    Generate a script for a video, depending on the subject of the video, 
+    the number of paragraphs, and the AI model.
+    
+    Args:
+        video_subject (str): The subject of the video.
+        paragraph_number (int): The number of paragraphs to generate.
+        ai_model (str): The AI model to use for generation.
+        voice (str): The voice/language for the script.
+        customPrompt (str): Optional custom prompt override.
+    
+    Returns:
+        str: The generated script for the video.
+    """
+```
+
+**Location:** `Backend/gpt.py:142-234`
+
+## How It Works
+
+<Steps>
+  <Step title="Prompt Construction">
+    The function builds a prompt based on the video subject, paragraph count, and target language. You can provide a custom prompt or use the default template.
+  </Step>
+  
+  <Step title="Ollama Generation">
+    The prompt is sent to the configured Ollama model via `generate_response()`, which handles both chat and generate API endpoints.
+  </Step>
+  
+  <Step title="Response Cleaning">
+    The AI response is cleaned to remove markdown formatting, asterisks, hashes, and unwanted indicators like "VOICEOVER" or "NARRATOR".
+  </Step>
+  
+  <Step title="Paragraph Selection">
+    The script is split into paragraphs and limited to the requested number.
+  </Step>
+</Steps>
+
+## Default Prompt Template
+
+The default prompt instructs the AI to:
+
+- Generate content specific to the video subject
+- Write in the specified language
+- Avoid markdown formatting or titles
+- Skip introductory phrases like "welcome to this video"
+- Exclude voiceover indicators
+- Get straight to the point
+
+```python
+prompt = f"""
+Generate a script for a video, depending on the subject of the video.
+
+The script is to be returned as a string with the specified number of paragraphs.
+
+YOU MUST NOT INCLUDE ANY TYPE OF MARKDOWN OR FORMATTING IN THE SCRIPT, NEVER USE A TITLE.
+YOU MUST WRITE THE SCRIPT IN THE LANGUAGE SPECIFIED IN [LANGUAGE].
+ONLY RETURN THE RAW CONTENT OF THE SCRIPT.
+
+Subject: {video_subject}
+Number of paragraphs: {paragraph_number}
+Language: {voice}
+"""
+```
+
+## Ollama Integration
+
+### Configuration
+
+Ollama settings are configured via environment variables:
+
+```bash
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=llama3.1:8b
+OLLAMA_TIMEOUT=180
+```
+
+### Client Initialization
+
+```python
+from ollama import Client
+
+def _ollama_client() -> Client:
+    return Client(host=OLLAMA_BASE_URL, timeout=OLLAMA_TIMEOUT)
+```
+
+### Model Selection
+
+List available Ollama models:
+
+```python
+def list_ollama_models() -> Tuple[List[str], str]:
+    """
+    Returns available Ollama model names and configured default model.
+    
+    Returns:
+        Tuple[List[str], str]: (available model names, default model)
+    """
+```
+
+**Location:** `Backend/gpt.py:34-64`
+
+<Note>
+If the specified model is not installed, MoneyPrinter will raise a `RuntimeError` with installation instructions: `ollama pull {model_name}`
+</Note>
+
+## Response Generation
+
+The `generate_response()` function handles the low-level Ollama API interaction:
+
+```python
+def generate_response(prompt: str, ai_model: str) -> str:
+    """
+    Generate a response from the AI model.
+    
+    Args:
+        prompt (str): The prompt to send to the model.
+        ai_model (str): The AI model to use.
+    
+    Returns:
+        str: The response from the AI model.
+    """
+```
+
+**Location:** `Backend/gpt.py:67-139`
+
+### Fallback Logic
+
+The function tries the chat endpoint first, then falls back to the generate endpoint:
+
+```python
+try:
+    response = client.chat(
+        model=model_name,
+        messages=[{"role": "user", "content": prompt}],
+        stream=False,
+    )
+except ResponseError as err:
+    if err.status_code == 404:
+        response = client.generate(
+            model=model_name, prompt=prompt, stream=False
+        )
+```
+
+## Metadata Generation
+
+The `generate_metadata()` function creates YouTube-optimized titles, descriptions, and keywords:
+
+```python
+def generate_metadata(
+    video_subject: str, script: str, ai_model: str
+) -> Tuple[str, str, List[str]]:
+    """
+    Generate metadata for a YouTube video, including the title, 
+    description, and keywords.
+    
+    Args:
+        video_subject (str): The subject of the video.
+        script (str): The script of the video.
+        ai_model (str): The AI model to use.
+    
+    Returns:
+        Tuple[str, str, List[str]]: The title, description, and keywords.
+    """
+```
+
+**Location:** `Backend/gpt.py:315-351`
+
+### Implementation
+
+<Steps>
+  <Step title="Generate Title">
+    Creates a catchy, SEO-friendly title using a dedicated prompt.
+  </Step>
+  
+  <Step title="Generate Description">
+    Writes a brief, engaging description based on the script content.
+  </Step>
+  
+  <Step title="Generate Keywords">
+    Uses `get_search_terms()` to extract 6 relevant keywords from the script.
+  </Step>
+</Steps>
+
+## Usage Example
+
+```python
+from Backend.gpt import generate_script, generate_metadata
+
+# Generate a script
+script = generate_script(
+    video_subject="The History of Space Exploration",
+    paragraph_number=3,
+    ai_model="llama3.1:8b",
+    voice="en_us_001",
+    customPrompt=""  # Use default prompt
+)
+
+if script:
+    print(f"Generated script:\n{script}")
+    
+    # Generate metadata
+    title, description, keywords = generate_metadata(
+        video_subject="The History of Space Exploration",
+        script=script,
+        ai_model="llama3.1:8b"
+    )
+    
+    print(f"\nTitle: {title}")
+    print(f"Description: {description}")
+    print(f"Keywords: {', '.join(keywords)}")
+```
+
+## Script Cleaning
+
+The generated script undergoes several cleaning operations:
+
+```python
+# Remove asterisks, hashes
+response = response.replace("*", "")
+response = response.replace("#", "")
+
+# Remove markdown syntax
+response = re.sub(r"\[.*\]", "", response)
+response = re.sub(r"\(.*\)", "", response)
+```
+
+<Warning>
+The script cleaning removes ALL markdown formatting. If you need formatted text, consider using a custom prompt that explicitly requests plain text output.
+</Warning>
+
+## Error Handling
+
+- **Model Not Found:** Raises `RuntimeError` with available models and installation command
+- **Empty Response:** Returns `None` and logs an error
+- **Connection Failed:** Raises `RuntimeError` with connection details
+- **Timeout:** Uses `OLLAMA_TIMEOUT` (default 180 seconds)
+
+<Tip>
+For longer scripts or complex topics, increase `OLLAMA_TIMEOUT` in your `.env` file to prevent timeouts.
+</Tip>
+
+## Search Term Generation
+
+The `get_search_terms()` function generates search queries for stock video footage:
+
+```python
+def get_search_terms(
+    video_subject: str, amount: int, script: str, ai_model: str
+) -> List[str]:
+    """
+    Generate a JSON-Array of search terms for stock videos.
+    
+    Args:
+        video_subject (str): The subject of the video.
+        amount (int): The amount of search terms to generate.
+        script (str): The script of the video.
+        ai_model (str): The AI model to use.
+    
+    Returns:
+        List[str]: The search terms for the video subject.
+    """
+```
+
+**Location:** `Backend/gpt.py:237-312`
+
+See [Video Search](/pipeline/video-search) for how these terms are used.
+
+## Performance Considerations
+
+- **Model Size:** Larger models (70B+) produce better scripts but take longer
+- **Paragraph Count:** More paragraphs = longer generation time
+- **Custom Prompts:** Complex prompts increase token usage and processing time
+- **Concurrency:** Only one Ollama request runs at a time per client
+
+<Note>
+MoneyPrinter uses streaming disabled (`stream=False`) for simpler response handling. For UI feedback, consider enabling streaming in custom implementations.
+</Note>

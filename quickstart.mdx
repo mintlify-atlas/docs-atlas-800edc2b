@@ -1,80 +1,226 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quickstart
+description: Get MoneyPrinter running locally with an Ollama model in under 5 minutes.
 ---
 
-## Get started in three steps
+# Quickstart
 
-Get your documentation site running locally and make your first customization.
+This guide walks you through the fastest path to generating your first AI-powered video with MoneyPrinter.
 
-### Step 1: Set up your local environment
+## Prerequisites
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+Ensure you have the following installed:
 
-### Step 2: Deploy your changes
-
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
-
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
-
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 3: Go live
-
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
-
-## Next steps
-
-Now that you have your docs running, explore these key features:
-
-<CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
-</CardGroup>
+- **Python 3.11+**
+- **uv** package manager ([installation guide](https://docs.astral.sh/uv/getting-started/installation/))
+- **FFmpeg**
+- **ImageMagick**
+- **Ollama**
 
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+For detailed installation instructions, see the [Installation Guide](/setup/installation).
 </Note>
+
+## Setup Steps
+
+<Steps>
+  <Step title="Clone the repository">
+    ```bash
+    git clone https://github.com/FujiwaraChoki/MoneyPrinter.git
+    cd MoneyPrinter
+    ```
+  </Step>
+
+  <Step title="Run the interactive setup script (recommended)">
+    The setup script checks dependencies, creates `.env`, installs packages, and optionally pulls an Ollama model:
+
+    ```bash
+    ./setup.sh
+    ```
+
+    **Or use manual setup:**
+
+    ```bash
+    # Install dependencies
+    uv sync
+
+    # Create environment file
+    cp .env.example .env
+    ```
+
+    Windows PowerShell:
+    ```powershell
+    Copy-Item .env.example .env
+    ```
+  </Step>
+
+  <Step title="Configure required environment variables">
+    Edit `.env` and set:
+
+    ```bash
+    # Required
+    TIKTOK_SESSION_ID="your_tiktok_session_id"
+    PEXELS_API_KEY="your_pexels_api_key"
+
+    # Optional (defaults shown)
+    OLLAMA_BASE_URL="http://localhost:11434"
+    OLLAMA_MODEL="llama3.1:8b"
+    ```
+
+    <Accordion title="How to get TikTok session ID">
+      1. Log into TikTok in your browser
+      2. Open Developer Tools (F12)
+      3. Go to Application → Cookies
+      4. Copy the value of the `sessionid` cookie
+    </Accordion>
+
+    <Accordion title="How to get Pexels API key">
+      1. Create a free account at [pexels.com/api](https://www.pexels.com/api/)
+      2. Generate an API key from your dashboard
+    </Accordion>
+  </Step>
+
+  <Step title="Start Ollama and pull a model">
+    In a new terminal:
+
+    ```bash
+    ollama serve
+    ```
+
+    Pull a model (if not already installed):
+
+    ```bash
+    ollama pull llama3.1:8b
+    ```
+
+    Verify the model is available:
+
+    ```bash
+    ollama list
+    ```
+
+    <Info>
+    If Ollama runs on another machine or port, set `OLLAMA_BASE_URL` in `.env`.
+    </Info>
+  </Step>
+
+  <Step title="Start the backend API">
+    ```bash
+    uv run python Backend/main.py
+    ```
+
+    The API will start on `http://localhost:8080`.
+  </Step>
+
+  <Step title="Start the worker (new terminal)">
+    The worker claims jobs from the queue and runs the generation pipeline:
+
+    ```bash
+    uv run python Backend/worker.py
+    ```
+  </Step>
+
+  <Step title="Start the frontend (new terminal)">
+    ```bash
+    cd Frontend
+    python3 -m http.server 3000
+    ```
+
+    Open your browser to `http://localhost:3000`.
+  </Step>
+
+  <Step title="Generate your first video">
+    In the web interface:
+
+    1. Enter a video subject (e.g., "Top 3 AI business ideas")
+    2. Expand **Advanced Options**
+    3. Select an Ollama model from the dropdown
+    4. Choose a voice (default: `en_us_001`)
+    5. Click **Generate**
+
+    Progress events will stream in real-time. The final video will be saved as `output.mp4` in the project root.
+  </Step>
+</Steps>
+
+## Verify Installation
+
+Test the API endpoints:
+
+```bash
+# List available Ollama models
+curl http://localhost:8080/api/models
+
+# Queue a test generation job
+curl -X POST http://localhost:8080/api/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "videoSubject": "AI business ideas",
+    "aiModel": "llama3.1:8b",
+    "voice": "en_us_001",
+    "paragraphNumber": 1,
+    "customPrompt": ""
+  }'
+```
+
+## Optional: Run Tests
+
+Install dev dependencies and run the test suite:
+
+```bash
+uv sync --group dev
+uv run pytest
+```
+
+See [Testing](/development/testing) for more details.
+
+## What's Next?
+
+<CardGroup cols={2}>
+  <Card title="Configuration" icon="gear" href="/setup/configuration">
+    Learn about all environment variables and options
+  </Card>
+  
+  <Card title="Docker Deployment" icon="docker" href="/setup/docker">
+    Run the full stack with Docker Compose
+  </Card>
+  
+  <Card title="Architecture" icon="sitemap" href="/concepts/architecture">
+    Understand the queue-based system design
+  </Card>
+  
+  <Card title="Troubleshooting" icon="wrench" href="/development/troubleshooting">
+    Common issues and solutions
+  </Card>
+</CardGroup>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="No Ollama models in dropdown">
+    - Ensure Ollama is running: `ollama serve`
+    - Check models are installed: `ollama list`
+    - Verify `OLLAMA_BASE_URL` in `.env`
+  </Accordion>
+
+  <Accordion title="ImageMagick not detected">
+    Set the explicit path in `.env`:
+
+    **Linux/macOS:**
+    ```bash
+    IMAGEMAGICK_BINARY="/usr/local/bin/magick"
+    ```
+
+    **Windows:**
+    ```bash
+    IMAGEMAGICK_BINARY="C:\\Program Files\\ImageMagick-7.1.1-Q16-HDRI\\magick.exe"
+    ```
+
+    Note the double backslashes (`\\`) for Windows paths.
+  </Accordion>
+
+  <Accordion title="Worker not processing jobs">
+    - Ensure the backend API is running first
+    - Check `DATABASE_URL` is correctly set (defaults to SQLite)
+    - Look for errors in the worker terminal output
+  </Accordion>
+</AccordionGroup>

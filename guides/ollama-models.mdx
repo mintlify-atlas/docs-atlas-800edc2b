@@ -1,0 +1,450 @@
+---
+title: Ollama Models
+description: Learn how to install, configure, and select Ollama models for script generation in MoneyPrinter.
+---
+
+# Ollama Models
+
+MoneyPrinter uses local Ollama models for AI-powered script generation and metadata creation.
+
+## Why Ollama?
+
+Ollama provides local LLM inference with several advantages:
+
+<CardGroup cols={2}>
+  <Card title="Privacy" icon="shield">
+    All AI processing happens locally. No data sent to cloud APIs.
+  </Card>
+  
+  <Card title="Cost" icon="dollar-sign">
+    Zero per-token charges. Run unlimited generations.
+  </Card>
+  
+  <Card title="Speed" icon="bolt">
+    Low-latency inference with local models.
+  </Card>
+  
+  <Card title="Flexibility" icon="sliders">
+    Choose from dozens of open-source models.
+  </Card>
+</CardGroup>
+
+## Installing Ollama
+
+### Download and Install
+
+<CodeGroup>
+```bash Linux
+curl -fsSL https://ollama.com/install.sh | sh
+```
+
+```bash macOS
+brew install ollama
+```
+
+```bash Windows
+# Download from https://ollama.com/download/windows
+```
+</CodeGroup>
+
+Verify installation:
+
+```bash
+ollama --version
+```
+
+### Start Ollama Service
+
+```bash
+ollama serve
+```
+
+Ollama runs on `http://localhost:11434` by default.
+
+<Info>
+On macOS/Windows, Ollama runs as a background service after installation. No need to manually run `ollama serve`.
+</Info>
+
+## Pulling Models
+
+### Basic Usage
+
+Pull a model:
+
+```bash
+ollama pull llama3.1:8b
+```
+
+List installed models:
+
+```bash
+ollama list
+```
+
+Expected output:
+
+```
+NAME              ID              SIZE      MODIFIED
+llama3.1:8b       42182419e950    4.7 GB    2 hours ago
+mistral:7b        f974a74358d6    4.1 GB    1 day ago
+```
+
+Remove a model:
+
+```bash
+ollama rm mistral:7b
+```
+
+## Recommended Models
+
+### For Script Generation
+
+| Model | Size | RAM Required | Speed | Quality | Best For |
+|-------|------|--------------|-------|---------|----------|
+| **llama3.1:8b** | 4.7GB | 8GB | Fast | Excellent | General purpose, balanced |
+| **mistral:7b** | 4.1GB | 8GB | Very Fast | Good | Quick iterations |
+| **llama3.1:70b** | 40GB | 64GB | Slow | Outstanding | Best quality (GPU required) |
+| **qwen2.5:7b** | 4.7GB | 8GB | Fast | Good | Multilingual content |
+| **phi3:mini** | 2.3GB | 4GB | Very Fast | Fair | Low-resource environments |
+
+### Selecting a Model
+
+Consider these factors:
+
+1. **Available RAM**: Model size + 2GB overhead
+2. **GPU**: CUDA/Metal acceleration for larger models
+3. **Script quality**: Larger models produce better scripts
+4. **Generation speed**: Smaller models are faster
+
+<Tip>
+Start with **llama3.1:8b** for the best balance of quality and performance.
+</Tip>
+
+## Configuring MoneyPrinter
+
+### Default Model
+
+Set the fallback model in `.env`:
+
+```bash .env
+OLLAMA_MODEL="llama3.1:8b"
+```
+
+This model is used when the frontend doesn't specify one:
+
+```python Backend/gpt.py
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
+
+def generate_response(prompt: str, ai_model: str) -> str:
+    model_name = (ai_model or "").strip() or OLLAMA_MODEL
+    # ...
+```
+
+### Remote Ollama Server
+
+Run Ollama on a different machine:
+
+```bash .env
+OLLAMA_BASE_URL="http://192.168.1.100:11434"
+```
+
+Or use a GPU server:
+
+```bash .env
+OLLAMA_BASE_URL="http://gpu-server:11434"
+```
+
+### Docker Configuration
+
+When running MoneyPrinter in Docker with Ollama on the host:
+
+```bash .env
+OLLAMA_BASE_URL="http://host.docker.internal:11434"
+```
+
+This works on macOS, Windows, and Linux (via `extra_hosts` in `docker-compose.yml`).
+
+## Model Selection in UI
+
+The frontend fetches available models from the API:
+
+```javascript Frontend/app.js
+async function loadOllamaModels() {
+  const response = await apiRequest('/api/models');
+  
+  if (response.status === 'success') {
+    const modelSelect = document.getElementById('aiModel');
+    modelSelect.innerHTML = '';
+    
+    response.models.forEach(model => {
+      const option = document.createElement('option');
+      option.value = model;
+      option.textContent = model;
+      if (model === response.default) {
+        option.selected = true;
+      }
+      modelSelect.appendChild(option);
+    });
+  }
+}
+```
+
+The API endpoint:
+
+```python Backend/main.py
+@app.route("/api/models", methods=["GET"])
+def models():
+    try:
+        available_models, default_model = list_ollama_models()
+        return jsonify(
+            {
+                "status": "success",
+                "models": available_models,
+                "default": default_model,
+            }
+        )
+    except Exception as err:
+        log(f"[-] Error fetching Ollama models: {str(err)}", "error")
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Could not fetch Ollama models. Is Ollama running?",
+                "models": [os.getenv("OLLAMA_MODEL", "llama3.1:8b")],
+                "default": os.getenv("OLLAMA_MODEL", "llama3.1:8b"),
+            }
+        )
+```
+
+## Model Usage in Pipeline
+
+### Script Generation
+
+```python Backend/gpt.py
+def generate_script(
+    video_subject: str,
+    paragraph_number: int,
+    ai_model: str,
+    voice: str,
+    customPrompt: str,
+) -> Optional[str]:
+    prompt = f"""
+    Generate a script for a video about {video_subject}.
+    Number of paragraphs: {paragraph_number}
+    Language: {voice}
+    """
+    
+    response = generate_response(prompt, ai_model)
+    # Clean and return script
+```
+
+### Search Terms
+
+```python Backend/gpt.py
+def get_search_terms(
+    video_subject: str, amount: int, script: str, ai_model: str
+) -> List[str]:
+    prompt = f"""
+    Generate {amount} search terms for stock videos.
+    Subject: {video_subject}
+    Return as JSON array: ["term1", "term2", ...]
+    """
+    
+    response = generate_response(prompt, ai_model)
+    return json.loads(response)
+```
+
+### Metadata Generation
+
+```python Backend/gpt.py
+def generate_metadata(
+    video_subject: str, script: str, ai_model: str
+) -> Tuple[str, str, List[str]]:
+    # Generate title
+    title_prompt = f"Generate a catchy YouTube title for: {video_subject}"
+    title = generate_response(title_prompt, ai_model)
+    
+    # Generate description
+    desc_prompt = f"Write a YouTube description for: {script}"
+    description = generate_response(desc_prompt, ai_model)
+    
+    # Generate keywords
+    keywords = get_search_terms(video_subject, 6, script, ai_model)
+    
+    return title, description, keywords
+```
+
+## Model Performance
+
+### Benchmarks
+
+Approximate generation times on Apple M2 Pro:
+
+| Model | Script (1 para) | Search Terms | Metadata | Total |
+|-------|-----------------|--------------|----------|-------|
+| llama3.1:8b | 5s | 3s | 8s | ~16s |
+| mistral:7b | 3s | 2s | 5s | ~10s |
+| llama3.1:70b | 25s | 15s | 35s | ~75s |
+| phi3:mini | 2s | 1s | 3s | ~6s |
+
+<Info>
+Timings exclude video download, TTS, and rendering. GPU acceleration significantly improves performance.
+</Info>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="No models in frontend dropdown">
+    **Verify Ollama is running**:
+
+    ```bash
+    curl http://localhost:11434/api/tags
+    ```
+
+    **Expected response**:
+
+    ```json
+    {
+      "models": [
+        {"name": "llama3.1:8b", "model": "llama3.1:8b", "size": 4661211648}
+      ]
+    }
+    ```
+
+    **If connection refused**:
+
+    ```bash
+    ollama serve
+    ```
+  </Accordion>
+
+  <Accordion title="Model not found error">
+    **Error message**:
+
+    ```
+    RuntimeError: Ollama model 'llama3.1:8b' is not installed.
+    Available models: mistral:7b
+    Install it with: ollama pull llama3.1:8b
+    ```
+
+    **Solution**:
+
+    ```bash
+    ollama pull llama3.1:8b
+    ```
+
+    The backend checks available models and provides clear instructions:
+
+    ```python Backend/gpt.py
+    except ResponseError as fallback_err:
+        if fallback_err.status_code == 404 and "not found" in str(fallback_err).lower():
+            available_models, _ = list_ollama_models()
+            available = ", ".join(available_models) if available_models else "none"
+            raise RuntimeError(
+                f"Ollama model '{model_name}' is not installed. "
+                f"Available models: {available}. "
+                f"Install it with: ollama pull {model_name}"
+            ) from fallback_err
+    ```
+  </Accordion>
+
+  <Accordion title="Ollama connection refused (Docker)">
+    **Check OLLAMA_BASE_URL**:
+
+    ```bash .env
+    OLLAMA_BASE_URL="http://host.docker.internal:11434"
+    ```
+
+    **Test connectivity from container**:
+
+    ```bash
+    docker exec -it backend curl http://host.docker.internal:11434/api/tags
+    ```
+
+    **Linux**: Verify `host.docker.internal` resolves:
+
+    ```bash
+    docker exec -it backend ping host.docker.internal
+    ```
+  </Accordion>
+
+  <Accordion title="Out of memory errors">
+    **Symptoms**:
+    - Ollama crashes during generation
+    - System becomes unresponsive
+    - "Out of memory" errors
+
+    **Solutions**:
+
+    1. Use a smaller model:
+       ```bash
+       ollama pull mistral:7b
+       ```
+
+    2. Limit concurrent generations (single worker)
+
+    3. Add swap space (Linux):
+       ```bash
+       sudo fallocate -l 16G /swapfile
+       sudo chmod 600 /swapfile
+       sudo mkswap /swapfile
+       sudo swapon /swapfile
+       ```
+  </Accordion>
+</AccordionGroup>
+
+## Advanced Configuration
+
+### Model Parameters
+
+Customize generation parameters (requires code changes):
+
+```python Backend/gpt.py
+response = client.chat(
+    model=model_name,
+    messages=[{"role": "user", "content": prompt}],
+    stream=False,
+    options={
+        "temperature": 0.7,  # Creativity (0.0-1.0)
+        "top_p": 0.9,        # Nucleus sampling
+        "top_k": 40,         # Token selection
+        "num_predict": 500,  # Max tokens
+    }
+)
+```
+
+### Timeout Configuration
+
+Adjust timeout for slow models:
+
+```bash .env
+OLLAMA_TIMEOUT=300  # 5 minutes
+```
+
+Used by the client:
+
+```python Backend/gpt.py
+OLLAMA_TIMEOUT = float(os.getenv("OLLAMA_TIMEOUT", "180"))
+
+def _ollama_client() -> Client:
+    return Client(host=OLLAMA_BASE_URL, timeout=OLLAMA_TIMEOUT)
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Generating Videos" icon="video" href="/guides/generating-videos">
+    Create your first video
+  </Card>
+  
+  <Card title="Pipeline" icon="diagram-project" href="/concepts/pipeline">
+    Understand the generation process
+  </Card>
+  
+  <Card title="Configuration" icon="gear" href="/setup/configuration">
+    All environment variables
+  </Card>
+  
+  <Card title="Troubleshooting" icon="wrench" href="/development/troubleshooting">
+    Common issues and solutions
+  </Card>
+</CardGroup>

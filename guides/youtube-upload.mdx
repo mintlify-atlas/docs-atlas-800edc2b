@@ -1,0 +1,510 @@
+---
+title: YouTube Upload
+description: Configure and automate YouTube video uploads with MoneyPrinter using OAuth 2.0 authentication.
+---
+
+# YouTube Upload Automation
+
+MoneyPrinter can automatically upload generated videos to YouTube using the YouTube Data API v3.
+
+## Overview
+
+YouTube upload requires:
+
+1. **Google Cloud Project** with YouTube Data API enabled
+2. **OAuth 2.0 credentials** (`client_secret.json`)
+3. **First-time authentication** to authorize the app
+4. **Enable automation** in video generation settings
+
+## Setup
+
+### 1. Create Google Cloud Project
+
+<Steps>
+  <Step title="Go to Google Cloud Console">
+    Visit [console.cloud.google.com](https://console.cloud.google.com/)
+  </Step>
+
+  <Step title="Create new project">
+    Click **Select a Project** → **New Project**
+
+    - **Project name**: MoneyPrinter
+    - Click **Create**
+  </Step>
+
+  <Step title="Enable YouTube Data API v3">
+    1. Navigate to **APIs & Services** → **Library**
+    2. Search for "YouTube Data API v3"
+    3. Click **Enable**
+  </Step>
+
+  <Step title="Configure OAuth consent screen">
+    Navigate to **APIs & Services** → **OAuth consent screen**:
+
+    - **User Type**: External
+    - **App name**: MoneyPrinter
+    - **User support email**: Your email
+    - **Developer contact**: Your email
+    - Click **Save and Continue**
+
+    **Scopes**:
+    - Add scope: `https://www.googleapis.com/auth/youtube.upload`
+    - Add scope: `https://www.googleapis.com/auth/youtube`
+    - Add scope: `https://www.googleapis.com/auth/youtubepartner`
+
+    **Test users**:
+    - Add your Google account email
+    - Click **Save and Continue**
+  </Step>
+
+  <Step title="Create OAuth credentials">
+    Navigate to **APIs & Services** → **Credentials**:
+
+    1. Click **+ Create Credentials** → **OAuth 2.0 Client ID**
+    2. **Application type**: Desktop app
+    3. **Name**: MoneyPrinter Desktop
+    4. Click **Create**
+    5. Download the JSON file
+  </Step>
+</Steps>
+
+### 2. Install Credentials
+
+Rename and place the downloaded file:
+
+```bash
+mv ~/Downloads/client_secret_*.json Backend/client_secret.json
+```
+
+Verify file location:
+
+```bash
+ls -la Backend/client_secret.json
+```
+
+<Warning>
+**Do not commit** `client_secret.json` to version control. It contains sensitive credentials.
+</Warning>
+
+### 3. First-Time Authentication
+
+Run a test generation with YouTube upload enabled:
+
+```bash
+uv run python Backend/main.py
+```
+
+In another terminal:
+
+```bash
+uv run python Backend/worker.py
+```
+
+Generate a video with YouTube upload:
+
+```bash
+curl -X POST http://localhost:8080/api/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "videoSubject": "Test upload",
+    "aiModel": "llama3.1:8b",
+    "voice": "en_us_001",
+    "paragraphNumber": 1,
+    "automateYoutubeUpload": true
+  }'
+```
+
+During processing, a browser window will open:
+
+1. Log in to your Google account
+2. Review requested permissions
+3. Click **Allow**
+4. Browser will show "The authentication flow has completed"
+
+The OAuth token is saved to `Backend/main.py-oauth2.json` for future uploads.
+
+## How It Works
+
+### Authentication Flow
+
+MoneyPrinter uses OAuth 2.0 with stored credentials:
+
+```python Backend/youtube.py
+def get_authenticated_service():
+    flow = flow_from_clientsecrets(
+        CLIENT_SECRETS_FILE, scope=SCOPES, message=MISSING_CLIENT_SECRETS_MESSAGE
+    )
+
+    oauth_store = BASE_DIR / f"{Path(sys.argv[0]).name}-oauth2.json"
+    storage = Storage(str(oauth_store))
+    credentials = storage.get()
+
+    if credentials is None or credentials.invalid:
+        flags = argparser.parse_args()
+        credentials = run_flow(flow, storage, flags)
+
+    return build(
+        YOUTUBE_API_SERVICE_NAME,
+        YOUTUBE_API_VERSION,
+        http=credentials.authorize(httplib2.Http()),
+    )
+```
+
+### Required Scopes
+
+```python Backend/youtube.py
+SCOPES = [
+    "https://www.googleapis.com/auth/youtube.upload",
+    "https://www.googleapis.com/auth/youtube",
+    "https://www.googleapis.com/auth/youtubepartner",
+]
+```
+
+### Upload Process
+
+The pipeline calls `upload_video` when `automateYoutubeUpload` is enabled:
+
+```python Backend/pipeline.py
+if automate_youtube_upload:
+    client_secrets_file = str((BASE_DIR / "client_secret.json").resolve())
+    
+    if not os.path.exists(client_secrets_file):
+        emit(
+            "[-] Client secrets file missing. YouTube upload will be skipped.",
+            "warning",
+        )
+        emit(
+            "[-] Please download the client_secret.json from Google Cloud Platform",
+            "error",
+        )
+    else:
+        video_metadata = {
+            "video_path": final_video_path,
+            "title": title,
+            "description": description,
+            "category": "28",  # Science & Technology
+            "keywords": ",".join(keywords),
+            "privacyStatus": "private",
+        }
+        
+        try:
+            video_response = upload_video(**video_metadata)
+            emit(f"Uploaded video ID: {video_response.get('id')}", "success")
+        except HttpError as err:
+            emit(
+                f"An HTTP error {err.resp.status} occurred:\n{err.content}", "error"
+            )
+```
+
+### Upload Implementation
+
+```python Backend/youtube.py
+def upload_video(video_path, title, description, category, keywords, privacy_status):
+    try:
+        youtube = get_authenticated_service()
+        
+        # Get channel ID
+        channels_response = youtube.channels().list(mine=True, part="id").execute()
+        for channel in channels_response["items"]:
+            log(f" => Channel ID: {channel['id']}", "info")
+        
+        # Upload video
+        video_response = initialize_upload(
+            youtube,
+            {
+                "file": video_path,
+                "title": title,
+                "description": description,
+                "category": category,
+                "keywords": keywords,
+                "privacyStatus": privacy_status,
+            },
+        )
+        return video_response
+    except HttpError as e:
+        log(f"[-] An HTTP error {e.resp.status} occurred:\n{e.content}", "error")
+        raise e
+```
+
+### Resumable Upload
+
+Large video files use resumable upload with retry logic:
+
+```python Backend/youtube.py
+def resumable_upload(insert_request: MediaFileUpload):
+    response = None
+    error = None
+    retry = 0
+    
+    while response is None:
+        try:
+            log(" => Uploading file...", "info")
+            status, response = insert_request.next_chunk()
+            if "id" in response:
+                log(f"Video id '{response['id']}' was successfully uploaded.", "success")
+                return response
+        except HttpError as e:
+            if e.resp.status in RETRIABLE_STATUS_CODES:
+                error = f"A retriable HTTP error {e.resp.status} occurred:\n{e.content}"
+            else:
+                raise
+        except RETRIABLE_EXCEPTIONS as e:
+            error = f"A retriable error occurred: {e}"
+
+        if error is not None:
+            log(error, "error")
+            retry += 1
+            if retry > MAX_RETRIES:
+                raise Exception("No longer attempting to retry.")
+
+            max_sleep = 2**retry
+            sleep_seconds = random.random() * max_sleep
+            log(f" => Sleeping {sleep_seconds} seconds and then retrying...", "info")
+            time.sleep(sleep_seconds)
+```
+
+## Video Metadata
+
+### Generated by AI
+
+Title, description, and keywords are auto-generated:
+
+```python Backend/gpt.py
+def generate_metadata(
+    video_subject: str, script: str, ai_model: str
+) -> Tuple[str, str, List[str]]:
+    # Generate title
+    title_prompt = f"""
+    Generate a catchy and SEO-friendly title for a YouTube shorts video about {video_subject}.
+    """
+    title = generate_response(title_prompt, ai_model).strip()
+    
+    # Generate description
+    description_prompt = f"""
+    Write a brief and engaging description for a YouTube shorts video about {video_subject}.
+    The video is based on the following script:
+    {script}
+    """
+    description = generate_response(description_prompt, ai_model).strip()
+    
+    # Generate keywords
+    keywords = get_search_terms(video_subject, 6, script, ai_model)
+    
+    return title, description, keywords
+```
+
+### Video Categories
+
+YouTube category IDs:
+
+| ID | Category |
+|----|----------|
+| 1 | Film & Animation |
+| 2 | Autos & Vehicles |
+| 10 | Music |
+| 15 | Pets & Animals |
+| 17 | Sports |
+| 19 | Travel & Events |
+| 20 | Gaming |
+| 22 | People & Blogs |
+| 23 | Comedy |
+| 24 | Entertainment |
+| 25 | News & Politics |
+| 26 | Howto & Style |
+| 27 | Education |
+| **28** | Science & Technology (default) |
+
+Change the category in `Backend/pipeline.py`:
+
+```python
+video_category_id = "28"  # Science & Technology
+```
+
+### Privacy Status
+
+Options:
+- `private`: Only you can see the video
+- `unlisted`: Anyone with the link can see it
+- `public`: Everyone can see it
+
+<Warning>
+Default is **`private`** for safety. Change in `Backend/pipeline.py` if needed.
+</Warning>
+
+## Enable/Disable Upload
+
+### Via UI
+
+Toggle "Automate YouTube Upload" checkbox in Advanced Options.
+
+### Via API
+
+```json
+{
+  "videoSubject": "AI Tutorial",
+  "automateYoutubeUpload": true
+}
+```
+
+### Default Behavior
+
+If `client_secret.json` is missing, upload is skipped with a warning:
+
+```
+[-] Client secrets file missing. YouTube upload will be skipped.
+[-] Please download the client_secret.json from Google Cloud Platform and store this inside the /Backend directory.
+```
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="OAuth consent screen not approved">
+    **Error**:
+
+    ```
+    Error 403: access_denied
+    The app has not been approved yet.
+    ```
+
+    **Solution**:
+
+    1. Go to **OAuth consent screen** in Google Cloud Console
+    2. Under **Test users**, add your Google account
+    3. Or submit app for verification (takes days)
+  </Accordion>
+
+  <Accordion title="Invalid client secret">
+    **Error**:
+
+    ```
+    oauth2client.clientsecrets.InvalidClientSecretsError: Missing property "client_secret"
+    ```
+
+    **Solution**:
+
+    - Re-download credentials from Google Cloud Console
+    - Ensure file is named exactly `client_secret.json`
+    - Place in `Backend/` directory
+  </Accordion>
+
+  <Accordion title="Quota exceeded">
+    **Error**:
+
+    ```
+    HttpError 403: quotaExceeded
+    ```
+
+    **Cause**: YouTube Data API has daily quotas:
+    - Free tier: 10,000 units/day
+    - Video upload: ~1,600 units
+    - ~6 uploads/day on free tier
+
+    **Solutions**:
+    - Wait 24 hours for quota reset
+    - Request quota increase in Google Cloud Console
+    - Use multiple Google Cloud projects
+  </Accordion>
+
+  <Accordion title="Upload fails with 401 error">
+    **Error**:
+
+    ```
+    HttpError 401: invalid_grant
+    Token has been expired or revoked.
+    ```
+
+    **Solution**:
+
+    Delete the OAuth token and re-authenticate:
+
+    ```bash
+    rm Backend/main.py-oauth2.json
+    ```
+
+    Run next upload to trigger re-authentication.
+  </Accordion>
+
+  <Accordion title="Browser auth doesn't open">
+    **Running on a server** without a display?
+
+    **Solution**: Use OAuth out-of-band flow (requires code changes):
+
+    ```python Backend/youtube.py
+    flow = flow_from_clientsecrets(
+        CLIENT_SECRETS_FILE,
+        scope=SCOPES,
+        redirect_uri='urn:ietf:wg:oauth:2.0:oob'
+    )
+    
+    auth_uri = flow.step1_get_authorize_url()
+    print(f"Go to: {auth_uri}")
+    code = input("Enter verification code: ")
+    credentials = flow.step2_exchange(code)
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Advanced Configuration
+
+### Custom Thumbnails
+
+MoneyPrinter doesn't currently generate thumbnails, but you can add support:
+
+```python Backend/youtube.py
+youtube.thumbnails().set(
+    videoId=video_response['id'],
+    media_body=MediaFileUpload('thumbnail.jpg', mimetype='image/jpeg')
+).execute()
+```
+
+### Playlists
+
+Add uploaded videos to a playlist:
+
+```python Backend/youtube.py
+youtube.playlistItems().insert(
+    part="snippet",
+    body={
+        "snippet": {
+            "playlistId": "PLxxxxxxxxxxxxxx",
+            "resourceId": {
+                "kind": "youtube#video",
+                "videoId": video_response['id']
+            }
+        }
+    }
+).execute()
+```
+
+### Scheduled Publishing
+
+Set a publish time:
+
+```python
+body = {
+    "status": {
+        "privacyStatus": "private",
+        "publishAt": "2026-03-10T08:00:00Z"  # ISO 8601 format
+    }
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Generating Videos" icon="video" href="/guides/generating-videos">
+    Complete video generation guide
+  </Card>
+  
+  <Card title="Background Music" icon="music" href="/guides/background-music">
+    Add music to your videos
+  </Card>
+  
+  <Card title="Pipeline" icon="diagram-project" href="/concepts/pipeline">
+    Video generation pipeline details
+  </Card>
+  
+  <Card title="Troubleshooting" icon="wrench" href="/development/troubleshooting">
+    Common issues and solutions
+  </Card>
+</CardGroup>

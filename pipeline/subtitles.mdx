@@ -1,0 +1,429 @@
+---
+title: Subtitles
+description: Generating and rendering subtitles with AssemblyAI or local generation
+icon: closed-captioning
+---
+
+MoneyPrinter generates accurate subtitles synchronized to the TTS audio. Subtitles can be generated using AssemblyAI's transcription API or locally based on the script timing.
+
+## Core Function
+
+The main subtitle generation function is `generate_subtitles()` in `Backend/video.py`:
+
+```python
+def generate_subtitles(
+    audio_path: str, 
+    sentences: List[str], 
+    audio_clips: List[AudioFileClip], 
+    voice: str
+) -> str:
+    """
+    Generates subtitles from a given audio file and returns the path to the subtitles.
+    
+    Args:
+        audio_path (str): The path to the audio file to generate subtitles from.
+        sentences (List[str]): All the sentences said out loud in the audio clips.
+        audio_clips (List[AudioFileClip]): All the individual audio clips which 
+                                           will make up the final audio track.
+        voice (str): The voice used for TTS (used for language detection).
+    
+    Returns:
+        str: The path to the generated subtitles.
+    """
+```
+
+**Location:** `Backend/video.py:118-159`
+
+## How It Works
+
+<Steps>
+  <Step title="Choose Method">
+    If `ASSEMBLY_AI_API_KEY` is set, use AssemblyAI transcription. Otherwise, generate subtitles locally.
+  </Step>
+  
+  <Step title="Generate SRT Content">
+    Create SRT-formatted subtitle file with timestamps and text.
+  </Step>
+  
+  <Step title="Equalize Subtitles">
+    Break long lines into shorter chunks (max 10 chars per line) for better readability.
+  </Step>
+  
+  <Step title="Save to File">
+    Write the SRT file to the subtitles directory with a unique UUID filename.
+  </Step>
+</Steps>
+
+## Generation Methods
+
+### Method 1: AssemblyAI (Recommended)
+
+Uses AI-powered transcription for accurate timing and multi-language support:
+
+```python
+def __generate_subtitles_assemblyai(audio_path: str, voice: str) -> str:
+    """
+    Generates subtitles from a given audio file and returns the path to the subtitles.
+    
+    Args:
+        audio_path (str): The path to the audio file to generate subtitles from.
+        voice (str): The voice used (for language code mapping).
+    
+    Returns:
+        str: The generated subtitles in SRT format.
+    """
+    language_mapping = {
+        "br": "pt",
+        "id": "en",  # AssemblyAI doesn't have Indonesian
+        "jp": "ja",
+        "kr": "ko",
+    }
+    
+    if voice in language_mapping:
+        lang_code = language_mapping[voice]
+    else:
+        lang_code = voice
+    
+    aai.settings.api_key = ASSEMBLY_AI_API_KEY
+    config = aai.TranscriptionConfig(language_code=lang_code)
+    transcriber = aai.Transcriber(config=config)
+    transcript = transcriber.transcribe(audio_path)
+    subtitles = transcript.export_subtitles_srt()
+    
+    return subtitles
+```
+
+**Location:** `Backend/video.py:49-78`
+
+<Note>
+AssemblyAI provides word-level timing accuracy and supports 30+ languages. Get an API key at [assemblyai.com](https://www.assemblyai.com/).
+</Note>
+
+### Method 2: Local Generation
+
+Generates subtitles based on audio clip durations:
+
+```python
+def __generate_subtitles_locally(
+    sentences: List[str], audio_clips: List[AudioFileClip]
+) -> str:
+    """
+    Generates subtitles from sentence list and audio clip durations.
+    
+    Args:
+        sentences (List[str]): All the sentences said out loud in the audio clips.
+        audio_clips (List[AudioFileClip]): All the individual audio clips.
+    
+    Returns:
+        str: The generated subtitles in SRT format.
+    """
+    def convert_to_srt_time_format(total_seconds: float) -> str:
+        # Convert total seconds to the SRT time format: HH:MM:SS,mmm
+        milliseconds_total = int(round(total_seconds * 1000))
+        hours, remainder = divmod(milliseconds_total, 3_600_000)
+        minutes, remainder = divmod(remainder, 60_000)
+        seconds, milliseconds = divmod(remainder, 1000)
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d},{milliseconds:03d}"
+    
+    start_time = 0
+    subtitles = []
+    
+    for i, (sentence, audio_clip) in enumerate(zip(sentences, audio_clips), start=1):
+        duration = audio_clip.duration
+        end_time = start_time + duration
+        
+        # Format: subtitle index, start time --> end time, sentence
+        subtitle_entry = f"{i}\n{convert_to_srt_time_format(start_time)} --> {convert_to_srt_time_format(end_time)}\n{sentence}\n"
+        subtitles.append(subtitle_entry)
+        
+        start_time += duration  # Update start time for the next subtitle
+    
+    return "\n".join(subtitles)
+```
+
+**Location:** `Backend/video.py:81-115`
+
+<Warning>
+Local generation is less accurate than AssemblyAI because it assumes each sentence takes exactly as long as its TTS audio clip, without accounting for pauses or pacing variations.
+</Warning>
+
+## SRT File Format
+
+Subtitles are saved in the standard SRT (SubRip) format:
+
+```srt
+1
+00:00:00,000 --> 00:00:03,500
+Welcome to this video about space exploration.
+
+2
+00:00:03,500 --> 00:00:07,200
+Today we'll learn about the Mars rover mission.
+
+3
+00:00:07,200 --> 00:00:11,000
+The rover was designed to search for signs of ancient life.
+```
+
+### SRT Structure
+
+Each subtitle entry has three parts:
+1. **Index:** Sequential number (1, 2, 3...)
+2. **Timestamp:** Start time `-->` End time in format `HH:MM:SS,mmm`
+3. **Text:** The subtitle text
+4. **Blank Line:** Separates entries
+
+## Subtitle Equalization
+
+Long lines are broken into shorter chunks for better readability:
+
+```python
+def equalize_subtitles(srt_path: str, max_chars: int = 10) -> None:
+    # Equalize subtitles
+    srt_equalizer.equalize_srt_file(srt_path, srt_path, max_chars)
+```
+
+**Location:** `Backend/video.py:133-135`
+
+This uses the `srt_equalizer` library to break long lines at word boundaries.
+
+### Before Equalization
+
+```srt
+1
+00:00:00,000 --> 00:00:03,500
+Welcome to this video about space exploration and Mars missions.
+```
+
+### After Equalization (10 chars max)
+
+```srt
+1
+00:00:00,000 --> 00:00:03,500
+Welcome to
+this video
+about space
+exploration
+and Mars
+missions.
+```
+
+<Tip>
+The default `max_chars=10` works well for vertical mobile videos. For wider videos, increase to 15-20 characters per line.
+</Tip>
+
+## Language Support
+
+### AssemblyAI Language Mapping
+
+Some voice codes are mapped to language codes:
+
+```python
+language_mapping = {
+    "br": "pt",     # Brazilian Portuguese → Portuguese
+    "id": "en",     # Indonesian → English (not supported)
+    "jp": "ja",     # Japanese
+    "kr": "ko",     # Korean
+}
+```
+
+**Supported Languages:**
+- English (en)
+- Spanish (es)
+- French (fr)
+- German (de)
+- Portuguese (pt)
+- Japanese (ja)
+- Korean (ko)
+- And 20+ more languages
+
+<Note>
+AssemblyAI doesn't support Indonesian transcription, so MoneyPrinter falls back to English for `id` voices.
+</Note>
+
+## Subtitle Positioning
+
+Subtitles are positioned during video generation using `subtitles_position`:
+
+```python
+# Common positions
+subtitles_position = "center,bottom"  # Bottom center (default)
+subtitles_position = "center,center"  # Screen center
+subtitles_position = "center,top"     # Top center (80px from top)
+```
+
+See [Video Composition](/pipeline/video-composition#subtitle-positioning) for implementation details.
+
+## Subtitle Rendering
+
+Subtitles are rendered with custom styling:
+
+```python
+font_path = str((FONTS_DIR / "bold_font.ttf").resolve())
+generator = lambda txt: TextClip(
+    font=font_path,
+    text=txt,
+    font_size=100,
+    color=text_color,      # Usually "white"
+    stroke_color="black",
+    stroke_width=5,
+)
+
+subtitles = SubtitlesClip(subtitles_path, make_textclip=generator)
+```
+
+**Location:** `Backend/video.py:290-306`
+
+### Styling Options
+
+- **Font:** Bold font from `fonts/bold_font.ttf`
+- **Size:** 100px (scaled for 1080x1920 resolution)
+- **Color:** Configurable via `text_color` parameter
+- **Stroke:** 5px black outline for readability
+
+<Tip>
+The black stroke ensures subtitles remain readable over any background video content.
+</Tip>
+
+## File Paths
+
+Subtitle files are saved with UUID filenames:
+
+```python
+SUBTITLES_DIR.mkdir(parents=True, exist_ok=True)
+subtitles_path = SUBTITLES_DIR / f"{uuid.uuid4()}.srt"
+```
+
+**Default location:** `subtitles/` directory in project root
+
+## Usage Example
+
+```python
+from Backend.video import generate_subtitles
+from moviepy import AudioFileClip
+
+# Prepare data
+audio_path = "voiceover.mp3"
+sentences = [
+    "Welcome to this video about space exploration.",
+    "Today we'll learn about the Mars rover mission.",
+    "The rover was designed to search for signs of ancient life."
+]
+
+# Load audio clips (one per sentence)
+audio_clips = [
+    AudioFileClip("segment1.mp3"),
+    AudioFileClip("segment2.mp3"),
+    AudioFileClip("segment3.mp3"),
+]
+
+# Generate subtitles
+subtitles_path = generate_subtitles(
+    audio_path=audio_path,
+    sentences=sentences,
+    audio_clips=audio_clips,
+    voice="en_us_001"
+)
+
+print(f"Subtitles saved to: {subtitles_path}")
+
+# Read the generated SRT
+with open(subtitles_path, "r", encoding="utf-8") as f:
+    print(f.read())
+```
+
+## Error Handling
+
+### Missing API Key
+
+If `ASSEMBLY_AI_API_KEY` is not set, the function falls back to local generation:
+
+```python
+if ASSEMBLY_AI_API_KEY is not None and ASSEMBLY_AI_API_KEY != "":
+    log("[+] Creating subtitles using AssemblyAI", "info")
+    subtitles = __generate_subtitles_assemblyai(audio_path, voice)
+else:
+    log("[+] Creating subtitles locally", "info")
+    subtitles = __generate_subtitles_locally(sentences, audio_clips)
+```
+
+### Common Errors
+
+- **API Key Invalid:** AssemblyAI raises authentication error
+- **Audio File Not Found:** Raises `FileNotFoundError`
+- **Empty Sentences:** Creates empty subtitle file (no entries)
+- **Mismatched Lengths:** If `len(sentences) != len(audio_clips)`, local generation will fail
+
+<Warning>
+Always ensure `sentences` and `audio_clips` have the same length when using local generation. Mismatched lengths will cause `zip()` to truncate to the shorter list.
+</Warning>
+
+## Time Format Conversion
+
+The local generator converts seconds to SRT timestamp format:
+
+```python
+def convert_to_srt_time_format(total_seconds: float) -> str:
+    # Convert total seconds to the SRT time format: HH:MM:SS,mmm
+    milliseconds_total = int(round(total_seconds * 1000))
+    hours, remainder = divmod(milliseconds_total, 3_600_000)
+    minutes, remainder = divmod(remainder, 60_000)
+    seconds, milliseconds = divmod(remainder, 1000)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d},{milliseconds:03d}"
+```
+
+### Example Conversions
+
+- `0.0` → `00:00:00,000`
+- `3.5` → `00:00:03,500`
+- `65.123` → `00:01:05,123`
+- `3661.5` → `01:01:01,500`
+
+## AssemblyAI Configuration
+
+AssemblyAI is configured with the API key from environment variables:
+
+```python
+import assemblyai as aai
+from dotenv import load_dotenv
+
+load_dotenv(ENV_FILE)
+ASSEMBLY_AI_API_KEY = os.getenv("ASSEMBLY_AI_API_KEY")
+
+# In the function:
+aai.settings.api_key = ASSEMBLY_AI_API_KEY
+config = aai.TranscriptionConfig(language_code=lang_code)
+transcriber = aai.Transcriber(config=config)
+transcript = transcriber.transcribe(audio_path)
+```
+
+**Environment Variable:**
+```bash
+ASSEMBLY_AI_API_KEY=your_api_key_here
+```
+
+<Note>
+AssemblyAI transcription typically takes 15-30% of the audio duration. A 60-second audio file takes ~10-20 seconds to transcribe.
+</Note>
+
+## Integration with Pipeline
+
+Subtitles are generated before final video composition:
+
+1. **Script Generation** → AI creates script
+2. **Voice Synthesis** → TTS generates audio from script
+3. **Subtitle Generation** → Audio transcribed to SRT ✓
+4. **Video Composition** → Subtitles burned into video
+
+See [Video Composition](/pipeline/video-composition#subtitle-rendering) for how subtitles are rendered onto the video.
+
+## Performance Considerations
+
+- **AssemblyAI:** Network latency + transcription time (~15-30% of audio duration)
+- **Local Generation:** Instant (no API calls), but less accurate
+- **Equalization:** Adds ~1-2 seconds for processing
+- **File I/O:** Minimal overhead (SRT files are small, less than 10KB typically)
+
+<Tip>
+For production use, AssemblyAI is recommended despite the API cost. The improved accuracy significantly enhances viewer experience.
+</Tip>

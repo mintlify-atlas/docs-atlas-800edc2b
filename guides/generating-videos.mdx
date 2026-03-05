@@ -1,0 +1,430 @@
+---
+title: Generating Videos
+description: Learn how to generate AI-powered videos through the MoneyPrinter UI and API.
+---
+
+# Generating Videos
+
+MoneyPrinter supports two methods for generating videos: the web UI and the REST API.
+
+## Using the Web UI
+
+### 1. Access the Frontend
+
+Ensure all services are running:
+
+```bash
+# Terminal 1: Backend
+uv run python Backend/main.py
+
+# Terminal 2: Worker
+uv run python Backend/worker.py
+
+# Terminal 3: Frontend
+cd Frontend
+python3 -m http.server 3000
+```
+
+Open [http://localhost:3000](http://localhost:3000) in your browser.
+
+### 2. Basic Generation
+
+<Steps>
+  <Step title="Enter video subject">
+    Type the topic for your video in the **Video Subject** field:
+
+    ```
+    Top 5 AI Tools for Developers
+    ```
+  </Step>
+
+  <Step title="Select voice">
+    Choose a TikTok TTS voice from the dropdown. Popular options:
+
+    | Voice Code | Description |
+    |------------|-------------|
+    | `en_us_001` | English (US) - Male |
+    | `en_us_006` | English (US) - Female |
+    | `en_uk_001` | English (UK) - Male |
+    | `es_mx_002` | Spanish (Mexico) |
+    | `fr_001` | French |
+  </Step>
+
+  <Step title="Configure advanced options (optional)">
+    Expand the **Advanced Options** section:
+
+    - **AI Model**: Select from your installed Ollama models
+    - **Paragraphs**: Number of paragraphs in the script (1-5)
+    - **Custom Prompt**: Override default script generation
+    - **Subtitle Position**: `center` or `bottom`
+    - **Text Color**: Hex color code (e.g., `#FFFF00`)
+    - **Background Music**: Toggle on/off
+    - **YouTube Upload**: Enable automatic upload
+    - **Threads**: CPU threads for rendering (2-16)
+  </Step>
+
+  <Step title="Click Generate">
+    Click the **Generate** button. The UI will:
+
+    1. Submit the job to the API
+    2. Receive a `jobId`
+    3. Start polling for status and events
+    4. Display real-time progress logs
+  </Step>
+
+  <Step title="Monitor progress">
+    The status area shows:
+
+    - Current job state (`queued`, `running`, `completed`, `failed`)
+    - Real-time event logs from the pipeline
+    - Error messages (if any)
+    - Download link when complete
+  </Step>
+</Steps>
+
+### 3. View Output
+
+When generation completes:
+
+- The video is saved as `output.mp4` in the project root
+- A download link appears in the UI
+- The final video path is shown in the logs
+
+### 4. Cancel Generation
+
+To cancel a running job:
+
+1. Click the **Cancel** button
+2. The worker will stop processing at the next checkpoint
+3. Job state changes to `cancelled`
+
+<Warning>
+Cancellation is not instant. The worker checks for cancellation between pipeline stages.
+</Warning>
+
+## Using the API
+
+### 1. Queue a Job
+
+Submit a generation request:
+
+```bash
+curl -X POST http://localhost:8080/api/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "videoSubject": "Top 5 AI coding assistants",
+    "aiModel": "llama3.1:8b",
+    "voice": "en_us_001",
+    "paragraphNumber": 1,
+    "customPrompt": "",
+    "subtitlesPosition": "center",
+    "color": "#FFFF00",
+    "useMusic": false,
+    "automateYoutubeUpload": false,
+    "threads": 4
+  }'
+```
+
+Response:
+
+```json
+{
+  "status": "success",
+  "message": "Video generation queued.",
+  "jobId": "abc123-def456-ghi789"
+}
+```
+
+### 2. Check Job Status
+
+Query the job state:
+
+```bash
+curl http://localhost:8080/api/jobs/abc123-def456-ghi789
+```
+
+Response:
+
+```json
+{
+  "status": "success",
+  "job": {
+    "id": "abc123-def456-ghi789",
+    "state": "running",
+    "cancelRequested": false,
+    "resultPath": null,
+    "errorMessage": null,
+    "createdAt": "2026-03-05T19:30:00Z",
+    "startedAt": "2026-03-05T19:30:05Z",
+    "completedAt": null
+  }
+}
+```
+
+### 3. Fetch Job Events
+
+Get real-time progress logs:
+
+```bash
+curl "http://localhost:8080/api/jobs/abc123-def456-ghi789/events?after=0"
+```
+
+Response:
+
+```json
+{
+  "status": "success",
+  "events": [
+    {
+      "id": 1,
+      "type": "queued",
+      "level": "info",
+      "message": "Job queued.",
+      "payload": null,
+      "timestamp": 1709665800.0
+    },
+    {
+      "id": 2,
+      "type": "running",
+      "level": "info",
+      "message": "Job started.",
+      "payload": null,
+      "timestamp": 1709665805.0
+    },
+    {
+      "id": 3,
+      "type": "log",
+      "level": "info",
+      "message": "[Video to be generated]",
+      "payload": null,
+      "timestamp": 1709665806.0
+    }
+  ]
+}
+```
+
+<Info>
+Use the `after` parameter to poll only for new events. Pass the last event ID you received.
+</Info>
+
+### 4. Poll for Completion
+
+Implement polling logic:
+
+```python
+import requests
+import time
+
+API_BASE = "http://localhost:8080"
+job_id = "abc123-def456-ghi789"
+last_event_id = 0
+
+while True:
+    # Check job status
+    response = requests.get(f"{API_BASE}/api/jobs/{job_id}")
+    job = response.json()["job"]
+    
+    if job["state"] in ["completed", "failed", "cancelled"]:
+        print(f"Job {job['state']}")
+        if job["resultPath"]:
+            print(f"Video saved to: {job['resultPath']}")
+        if job["errorMessage"]:
+            print(f"Error: {job['errorMessage']}")
+        break
+    
+    # Fetch new events
+    events_response = requests.get(
+        f"{API_BASE}/api/jobs/{job_id}/events",
+        params={"after": last_event_id}
+    )
+    events = events_response.json()["events"]
+    
+    for event in events:
+        print(f"[{event['level']}] {event['message']}")
+        last_event_id = event["id"]
+    
+    time.sleep(2)  # Poll every 2 seconds
+```
+
+### 5. Cancel a Job
+
+Request cancellation:
+
+```bash
+curl -X POST http://localhost:8080/api/jobs/abc123-def456-ghi789/cancel
+```
+
+Response:
+
+```json
+{
+  "status": "success",
+  "message": "Cancellation requested."
+}
+```
+
+## Custom Prompts
+
+Override the default script generation with a custom prompt:
+
+```json
+{
+  "videoSubject": "AI in Healthcare",
+  "customPrompt": "Write a 30-second script about how AI is revolutionizing medical diagnosis. Focus on early cancer detection. Use simple language suitable for a general audience. Do not include any markdown formatting.",
+  "aiModel": "llama3.1:8b",
+  "voice": "en_us_001",
+  "paragraphNumber": 1
+}
+```
+
+<Note>
+Custom prompts completely replace the default system prompt. Ensure your prompt includes formatting instructions.
+</Note>
+
+## Advanced Configuration
+
+### Subtitle Styling
+
+Customize subtitle appearance:
+
+```json
+{
+  "subtitlesPosition": "bottom",
+  "color": "#00FF00",  // Green text
+  "threads": 8  // Faster rendering
+}
+```
+
+Subtitle rendering uses the font at `fonts/bold_font.ttf`:
+
+```python Backend/video.py
+generator = lambda txt: TextClip(
+    text=txt,
+    font_size=70,
+    color=text_color,
+    stroke_color="black",
+    stroke_width=5,
+    font=str(FONTS_DIR / "bold_font.ttf"),
+    size=video.size,
+    method="caption",
+)
+```
+
+### Video Dimensions
+
+Videos are rendered at **1080x1920** (vertical format) for YouTube Shorts/TikTok:
+
+```python Backend/video.py
+clip = clip.resized(height=1920)
+clip = clip.cropped(width=1080, height=1920, x_center=clip.w / 2, y_center=clip.h / 2)
+```
+
+### Background Music
+
+Enable background music:
+
+```json
+{
+  "useMusic": true
+}
+```
+
+Requirements:
+- Place `.mp3` files in the `Songs/` directory
+- Music is mixed at 10% volume
+- Random song selection
+
+See [Background Music Guide](/guides/background-music) for details.
+
+## Common Use Cases
+
+### Generate a Quick Short
+
+```bash
+curl -X POST http://localhost:8080/api/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "videoSubject": "Fun fact about space",
+    "aiModel": "llama3.1:8b",
+    "voice": "en_us_001",
+    "paragraphNumber": 1
+  }'
+```
+
+### Educational Content
+
+```bash
+curl -X POST http://localhost:8080/api/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "videoSubject": "How photosynthesis works",
+    "aiModel": "llama3.1:8b",
+    "voice": "en_us_006",
+    "paragraphNumber": 2,
+    "subtitlesPosition": "bottom",
+    "color": "#FFFFFF"
+  }'
+```
+
+### Marketing Video
+
+```bash
+curl -X POST http://localhost:8080/api/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "videoSubject": "New product launch",
+    "customPrompt": "Create a 20-second promotional script for a new smartwatch with health tracking features. Highlight benefits and call-to-action.",
+    "aiModel": "llama3.1:8b",
+    "voice": "en_us_001",
+    "useMusic": true,
+    "paragraphNumber": 1
+  }'
+```
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Job stays in 'queued' state">
+    - Ensure the worker is running: `uv run python Backend/worker.py`
+    - Check worker logs for errors
+    - Verify database connectivity
+  </Accordion>
+
+  <Accordion title="No stock videos found">
+    - Verify `PEXELS_API_KEY` in `.env`
+    - Try a broader video subject
+    - Check Pexels API quota (200 requests/hour on free tier)
+  </Accordion>
+
+  <Accordion title="TTS fails">
+    - Verify `TIKTOK_SESSION_ID` is valid
+    - Session IDs expire - refresh if needed
+    - Check for special characters in script
+  </Accordion>
+
+  <Accordion title="Subtitle rendering error">
+    - Ensure ImageMagick is installed
+    - Set `IMAGEMAGICK_BINARY` in `.env` if not auto-detected
+    - Check font file exists at `fonts/bold_font.ttf`
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Ollama Models" icon="brain" href="/guides/ollama-models">
+    Choose and configure AI models
+  </Card>
+  
+  <Card title="Background Music" icon="music" href="/guides/background-music">
+    Add music to your videos
+  </Card>
+  
+  <Card title="YouTube Upload" icon="youtube" href="/guides/youtube-upload">
+    Automate YouTube uploads
+  </Card>
+  
+  <Card title="Pipeline" icon="diagram-project" href="/concepts/pipeline">
+    Understand the video generation process
+  </Card>
+</CardGroup>

@@ -1,0 +1,152 @@
+---
+title: AI Models
+description: Get available AI models for script generation
+---
+
+## GET /api/models
+
+Retrieves the list of available Ollama models for script generation and the default model to use.
+
+### Response
+
+<ResponseField name="status" type="string">
+  `"success"` if models were retrieved successfully, `"error"` if Ollama is not running or unreachable.
+</ResponseField>
+
+<ResponseField name="models" type="array">
+  Array of available model names.
+  
+  Example: `["llama3.1:8b", "llama3.1:70b", "mistral:7b"]`
+</ResponseField>
+
+<ResponseField name="default" type="string">
+  The default model name to use for generation.
+  
+  Example: `"llama3.1:8b"`
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Only present on error responses. Describes why model fetching failed.
+</ResponseField>
+
+### Example Request
+
+<CodeGroup>
+
+```bash cURL
+curl http://localhost:8080/api/models
+```
+
+```python Python
+import requests
+
+response = requests.get("http://localhost:8080/api/models")
+data = response.json()
+
+if data["status"] == "success":
+    print(f"Available models: {data['models']}")
+    print(f"Default model: {data['default']}")
+else:
+    print(f"Error: {data['message']}")
+```
+
+```javascript JavaScript
+const response = await fetch('http://localhost:8080/api/models');
+const data = await response.json();
+
+if (data.status === 'success') {
+  console.log(`Available models: ${data.models}`);
+  console.log(`Default model: ${data.default}`);
+} else {
+  console.log(`Error: ${data.message}`);
+}
+```
+
+</CodeGroup>
+
+### Example Response (Success)
+
+```json
+{
+  "status": "success",
+  "models": [
+    "llama3.1:8b",
+    "llama3.1:70b",
+    "mistral:7b",
+    "phi3:mini"
+  ],
+  "default": "llama3.1:8b"
+}
+```
+
+### Example Response (Error)
+
+When Ollama is not running or unreachable:
+
+```json
+{
+  "status": "error",
+  "message": "Could not fetch Ollama models. Is Ollama running?",
+  "models": [
+    "llama3.1:8b"
+  ],
+  "default": "llama3.1:8b"
+}
+```
+
+<Note>
+  Even on error, the response includes a fallback model list from the `OLLAMA_MODEL` environment variable.
+</Note>
+
+## Usage
+
+The models returned by this endpoint can be used in the `aiModel` field when creating a generation job:
+
+```python
+import requests
+
+# Get available models
+models_response = requests.get("http://localhost:8080/api/models")
+default_model = models_response.json()["default"]
+
+# Use in generation request
+requests.post(
+    "http://localhost:8080/api/generate",
+    json={
+        "videoSubject": "AI technology",
+        "aiModel": default_model,  # Use the default model
+        "paragraphNumber": 3
+    }
+)
+```
+
+## Model Selection
+
+<Tip>
+  **Performance vs Quality Trade-off**
+  
+  - Smaller models (e.g., `llama3.1:8b`, `phi3:mini`) are faster but may produce simpler scripts
+  - Larger models (e.g., `llama3.1:70b`) produce higher quality scripts but take longer
+  - The default model is usually a good balance for most use cases
+</Tip>
+
+## Troubleshooting
+
+If the endpoint returns an error:
+
+1. **Check if Ollama is running:**
+   ```bash
+   ollama list
+   ```
+
+2. **Verify the Ollama server is accessible:**
+   ```bash
+   curl http://localhost:11434/api/tags
+   ```
+
+3. **Check the `OLLAMA_MODEL` environment variable in `.env`:**
+   ```bash
+   OLLAMA_MODEL=llama3.1:8b
+   ```
+
+See the [Ollama Models Guide](/guides/ollama-models) for more details.

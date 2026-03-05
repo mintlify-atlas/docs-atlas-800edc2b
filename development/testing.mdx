@@ -1,0 +1,413 @@
+---
+title: Testing
+description: Learn how to run tests for MoneyPrinter using pytest.
+---
+
+# Testing
+
+MoneyPrinter uses `pytest` for backend testing with isolated database fixtures.
+
+## Quick Start
+
+### Install Test Dependencies
+
+Install development dependencies including pytest:
+
+```bash
+uv sync --group dev
+```
+
+This installs:
+
+```toml pyproject.toml
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.4",
+    "pytest-cov>=6.0.0",
+]
+```
+
+### Run All Tests
+
+```bash
+uv run pytest
+```
+
+Expected output:
+
+```
+========================= test session starts ==========================
+platform darwin -- Python 3.11.5, pytest-8.3.4
+rootdir: /Users/you/MoneyPrinter
+collected 42 items
+
+tests/test_api_jobs.py .........                                 [ 21%]
+tests/test_api_misc.py ....                                      [ 31%]
+tests/test_repository.py ..........                              [ 55%]
+tests/test_worker.py .....                                       [ 67%]
+tests/test_utils.py ..............                               [100%]
+
+========================== 42 passed in 2.51s ==========================
+```
+
+## Test Structure
+
+### Test Files
+
+| File | Description |
+|------|-------------|
+| `tests/test_api_jobs.py` | API endpoints for job queue, status, events, and cancellation |
+| `tests/test_api_misc.py` | Model listing fallback and song upload behavior |
+| `tests/test_repository.py` | Database operations (create, claim, cancel, completion) |
+| `tests/test_worker.py` | Worker loop behavior (success, failure, cancellation, empty queue) |
+| `tests/test_utils.py` | Filesystem cleanup, song selection, ImageMagick resolution |
+| `tests/conftest.py` | Shared fixtures (isolated database per test) |
+
+### Test Fixtures
+
+Tests use an isolated SQLite database:
+
+```python tests/conftest.py
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from Backend.db import Base
+
+@pytest.fixture
+def db_session():
+    """Provide an isolated in-memory database for each test."""
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    SessionLocal = sessionmaker(bind=engine)
+    session = SessionLocal()
+    
+    yield session
+    
+    session.close()
+```
+
+Each test gets a fresh database, ensuring isolation.
+
+## Running Tests
+
+### Run Specific Test File
+
+```bash
+uv run pytest tests/test_repository.py
+```
+
+### Run Single Test
+
+```bash
+uv run pytest tests/test_repository.py::test_create_job_persists_payload_and_queued_event
+```
+
+### Run Test Class
+
+```bash
+uv run pytest tests/test_api_jobs.py::TestJobEndpoints
+```
+
+### Run with Verbose Output
+
+```bash
+uv run pytest -v
+```
+
+### Run with Coverage
+
+```bash
+uv run pytest --cov=Backend --cov-report=html
+```
+
+Open `htmlcov/index.html` to view coverage report.
+
+## Example Tests
+
+### Repository Tests
+
+Test job creation and event logging:
+
+```python tests/test_repository.py
+def test_create_job_persists_payload_and_queued_event(db_session):
+    payload = {"videoSubject": "Test", "voice": "en_us_001"}
+    job = create_job(db_session, payload=payload)
+    
+    assert job.id is not None
+    assert job.status == "queued"
+    assert job.payload == payload
+    
+    events = list_job_events(db_session, job.id)
+    assert len(events) == 1
+    assert events[0].event_type == "queued"
+    assert events[0].message == "Job queued."
+```
+
+### Worker Tests
+
+Test worker processes jobs:
+
+```python tests/test_worker.py
+def test_worker_processes_queued_job(db_session, monkeypatch):
+    # Mock pipeline
+    def mock_pipeline(data, is_cancelled, on_log):
+        return "output.mp4"
+    
+    monkeypatch.setattr("Backend.worker.run_generation_pipeline", mock_pipeline)
+    
+    # Create job
+    job = create_job(db_session, payload={"videoSubject": "Test"})
+    
+    # Process job
+    processed = process_next_job()
+    
+    assert processed is True
+    
+    # Check job completed
+    job = get_job(db_session, job.id)
+    assert job.status == "completed"
+    assert job.result_path == "output.mp4"
+```
+
+### API Tests
+
+Test API endpoints:
+
+```python tests/test_api_jobs.py
+def test_generate_endpoint_creates_job(client, db_session):
+    response = client.post(
+        "/api/generate",
+        json={"videoSubject": "AI Tools", "voice": "en_us_001"},
+    )
+    
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["status"] == "success"
+    assert "jobId" in data
+    
+    # Verify job in database
+    job = get_job(db_session, data["jobId"])
+    assert job is not None
+    assert job.status == "queued"
+```
+
+## Test Coverage
+
+Current test scope:
+
+### API Coverage
+
+- ✅ Job creation (`POST /api/generate`)
+- ✅ Job status retrieval (`GET /api/jobs/:id`)
+- ✅ Event streaming (`GET /api/jobs/:id/events`)
+- ✅ Job cancellation (`POST /api/jobs/:id/cancel`)
+- ✅ Model listing with fallback (`GET /api/models`)
+- ✅ Song upload (`POST /api/upload-songs`)
+
+### Repository Coverage
+
+- ✅ Job creation with events
+- ✅ Job claiming with Postgres/SQLite
+- ✅ Event appending
+- ✅ Job completion
+- ✅ Job failure
+- ✅ Job cancellation (queued and running)
+
+### Worker Coverage
+
+- ✅ Process job success
+- ✅ Process job failure
+- ✅ Process job cancellation
+- ✅ Handle empty queue
+- ✅ Clean temp directories
+
+### Utility Coverage
+
+- ✅ Directory cleanup
+- ✅ Random song selection
+- ✅ ImageMagick binary resolution
+- ✅ Environment variable validation
+
+## Writing New Tests
+
+### Test Template
+
+```python tests/test_example.py
+import pytest
+from Backend.repository import create_job, get_job
+
+def test_new_feature(db_session):
+    """Test description."""
+    # Arrange: Set up test data
+    payload = {"videoSubject": "Test Topic"}
+    
+    # Act: Execute the feature
+    job = create_job(db_session, payload=payload)
+    
+    # Assert: Verify expectations
+    assert job.id is not None
+    assert job.status == "queued"
+    assert job.payload["videoSubject"] == "Test Topic"
+```
+
+### Mocking External Services
+
+Mock Ollama API calls:
+
+```python
+import pytest
+from unittest.mock import Mock, patch
+
+@patch("Backend.gpt._ollama_client")
+def test_script_generation(mock_client, db_session):
+    # Mock Ollama response
+    mock_response = Mock()
+    mock_response.message.content = "This is a test script."
+    mock_client.return_value.chat.return_value = mock_response
+    
+    # Test function
+    script = generate_script(
+        "AI Tools", paragraph_number=1, ai_model="llama3.1:8b", voice="en", customPrompt=""
+    )
+    
+    assert script == "This is a test script."
+```
+
+### Testing Error Conditions
+
+```python
+def test_job_not_found(client):
+    response = client.get("/api/jobs/nonexistent-id")
+    
+    assert response.status_code == 404
+    data = response.get_json()
+    assert data["status"] == "error"
+    assert "not found" in data["message"].lower()
+```
+
+## Continuous Integration
+
+### GitHub Actions Example
+
+```yaml .github/workflows/test.yml
+name: Tests
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          pip install uv
+          uv sync --group dev
+      
+      - name: Run tests
+        run: uv run pytest --cov=Backend --cov-report=xml
+      
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage.xml
+```
+
+## Test Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Isolation" icon="lock">
+    Each test uses a fresh database. No shared state.
+  </Card>
+  
+  <Card title="Speed" icon="bolt">
+    Use in-memory SQLite for fast test execution.
+  </Card>
+  
+  <Card title="Mocking" icon="mask">
+    Mock external services (Ollama, Pexels, TikTok) to avoid network calls.
+  </Card>
+  
+  <Card title="Coverage" icon="chart-line">
+    Aim for >80% code coverage on core modules.
+  </Card>
+</CardGroup>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Import errors when running tests">
+    **Error**:
+
+    ```
+    ModuleNotFoundError: No module named 'Backend'
+    ```
+
+    **Solution**:
+
+    Ensure you're running tests with `uv run`:
+
+    ```bash
+    uv run pytest
+    ```
+
+    Not:
+
+    ```bash
+    pytest  # Wrong!
+    ```
+  </Accordion>
+
+  <Accordion title="Database conflicts between tests">
+    **Symptom**: Tests pass individually but fail when run together.
+
+    **Solution**: Ensure each test uses `db_session` fixture:
+
+    ```python
+    def test_example(db_session):  # Correct
+        # ...
+    
+    def test_example():  # Wrong - no isolation
+        # ...
+    ```
+  </Accordion>
+
+  <Accordion title="Slow tests">
+    **Causes**:
+    - Not using in-memory database
+    - Not mocking external APIs
+    - Running actual video generation
+
+    **Solutions**:
+    - Use `:memory:` SQLite for tests
+    - Mock `run_generation_pipeline`
+    - Avoid real API calls
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Contributing" icon="code-pull-request" href="/CONTRIBUTING">
+    Contribute to MoneyPrinter
+  </Card>
+  
+  <Card title="Architecture" icon="sitemap" href="/concepts/architecture">
+    Understand the system design
+  </Card>
+  
+  <Card title="Troubleshooting" icon="wrench" href="/development/troubleshooting">
+    Common issues and solutions
+  </Card>
+  
+  <Card title="Development Guide" icon="code" href="/development">
+    Development workflow and standards
+  </Card>
+</CardGroup>

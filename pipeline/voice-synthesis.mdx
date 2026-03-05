@@ -1,0 +1,364 @@
+---
+title: Voice Synthesis
+description: Text-to-speech using TikTok's voice API
+icon: microphone
+---
+
+MoneyPrinter uses TikTok's text-to-speech API to generate natural-sounding voiceovers in multiple languages and voices. The TTS system supports long texts by automatically splitting and threading requests.
+
+## Core Function
+
+The main TTS function is `tts()` in `Backend/tiktokvoice.py`:
+
+```python
+def tts(
+    text: str,
+    voice: str = "none",
+    filename: str = "output.mp3",
+    play_sound: bool = False,
+) -> None:
+    """
+    Creates a text-to-speech audio file using TikTok's voice API.
+    
+    Args:
+        text (str): The text to convert to speech.
+        voice (str): The voice ID to use.
+        filename (str): Output audio file path.
+        play_sound (bool): Whether to play the audio after generation.
+    """
+```
+
+**Location:** `Backend/tiktokvoice.py:121-207`
+
+## How It Works
+
+<Steps>
+  <Step title="Service Availability Check">
+    Verifies TikTok TTS service is reachable before processing.
+  </Step>
+  
+  <Step title="Text Splitting">
+    Splits text into 300-character chunks if it exceeds the API limit.
+  </Step>
+  
+  <Step title="Threaded Generation">
+    Uses threading to generate audio for multiple chunks in parallel.
+  </Step>
+  
+  <Step title="Audio Assembly">
+    Concatenates base64-encoded audio chunks into a single file.
+  </Step>
+</Steps>
+
+## Available Voices
+
+MoneyPrinter supports 40+ voices across multiple languages:
+
+### Disney Voices
+
+```python
+"en_us_ghostface"    # Ghost Face
+"en_us_chewbacca"    # Chewbacca
+"en_us_c3po"         # C3PO
+"en_us_stitch"       # Stitch
+"en_us_stormtrooper" # Stormtrooper
+"en_us_rocket"       # Rocket
+```
+
+### English Voices
+
+```python
+"en_au_001"  # English AU - Female
+"en_au_002"  # English AU - Male
+"en_uk_001"  # English UK - Male 1
+"en_uk_003"  # English UK - Male 2
+"en_us_001"  # English US - Female (Int. 1)
+"en_us_002"  # English US - Female (Int. 2)
+"en_us_006"  # English US - Male 1
+"en_us_007"  # English US - Male 2
+"en_us_009"  # English US - Male 3
+"en_us_010"  # English US - Male 4
+```
+
+### European Voices
+
+```python
+"fr_001"  # French - Male 1
+"fr_002"  # French - Male 2
+"de_001"  # German - Female
+"de_002"  # German - Male
+"es_002"  # Spanish - Male
+```
+
+### American Voices
+
+```python
+"es_mx_002"  # Spanish MX - Male
+"br_001"     # Portuguese BR - Female 1
+"br_003"     # Portuguese BR - Female 2
+"br_004"     # Portuguese BR - Female 3
+"br_005"     # Portuguese BR - Male
+```
+
+### Asian Voices
+
+```python
+"id_001"  # Indonesian - Female
+"jp_001"  # Japanese - Female 1
+"jp_003"  # Japanese - Female 2
+"jp_005"  # Japanese - Female 3
+"jp_006"  # Japanese - Male
+"kr_002"  # Korean - Male 1
+"kr_003"  # Korean - Female
+"kr_004"  # Korean - Male 2
+```
+
+### Singing Voices
+
+```python
+"en_female_f08_salut_damour"  # Alto
+"en_male_m03_lobby"            # Tenor
+"en_female_f08_warmy_breeze"   # Warmy Breeze
+"en_male_m03_sunshine_soon"    # Sunshine Soon
+```
+
+### Special Voices
+
+```python
+"en_male_narration"      # Narrator
+"en_male_funny"          # Wacky
+"en_female_emotional"    # Peaceful
+```
+
+**Complete list:** `Backend/tiktokvoice.py:18-67`
+
+<Tip>
+For YouTube Shorts, `en_us_001` (Female) and `en_us_006` (Male 1) are the most popular and recognizable voices.
+</Tip>
+
+## API Endpoints
+
+MoneyPrinter uses two fallback endpoints:
+
+```python
+ENDPOINTS = [
+    "https://tiktok-tts.weilnet.workers.dev/api/generation",
+    "https://tiktoktts.com/api/tiktok-tts",
+]
+```
+
+If the first endpoint is unavailable, it automatically switches to the second.
+
+## Text Length Limits
+
+TikTok's API has a 300-character limit per request:
+
+```python
+TEXT_BYTE_LIMIT = 300
+```
+
+### Automatic Text Splitting
+
+For longer texts, MoneyPrinter splits by word boundaries:
+
+```python
+def split_string(string: str, chunk_size: int) -> List[str]:
+    """Split a string into chunks of maximum chunk_size, 
+    breaking at word boundaries."""
+    words = string.split()
+    result = []
+    current_chunk = ""
+    for word in words:
+        if len(current_chunk) + len(word) + 1 <= chunk_size:
+            current_chunk += f" {word}"
+        else:
+            if current_chunk:
+                result.append(current_chunk.strip())
+            current_chunk = word
+    if current_chunk:
+        result.append(current_chunk.strip())
+    return result
+```
+
+**Location:** `Backend/tiktokvoice.py:79-94`
+
+<Note>
+Text is split at word boundaries, not character boundaries, ensuring words aren't cut off mid-way.
+</Note>
+
+## Threading for Long Texts
+
+For texts exceeding 300 characters, multiple API requests run in parallel:
+
+```python
+# Split longer text into smaller parts
+text_parts = split_string(text, 299)
+audio_base64_data = [None] * len(text_parts)
+
+# Define a thread function to generate audio for each text part
+def generate_audio_thread(text_part, index):
+    audio = generate_audio(text_part, voice)
+    # Parse base64 from response
+    audio_base64_data[index] = base64_data
+
+threads = []
+for index, text_part in enumerate(text_parts):
+    thread = threading.Thread(
+        target=generate_audio_thread, args=(text_part, index)
+    )
+    thread.start()
+    threads.append(thread)
+
+# Wait for all threads to complete
+for thread in threads:
+    thread.join()
+
+# Concatenate the base64 data in the correct order
+audio_base64_data = "".join(audio_base64_data)
+```
+
+**Location:** `Backend/tiktokvoice.py:167-199`
+
+<Warning>
+Threading speeds up generation for long texts, but may hit rate limits if too many requests are sent simultaneously. The current implementation doesn't throttle requests.
+</Warning>
+
+## Audio Generation
+
+The `generate_audio()` function sends the actual API request:
+
+```python
+def generate_audio(text: str, voice: str) -> bytes:
+    """Send POST request to get the audio data."""
+    url = f"{ENDPOINTS[current_endpoint]}"
+    headers = {"Content-Type": "application/json"}
+    data = {"text": text, "voice": voice}
+    response = requests.post(url, headers=headers, json=data)
+    return response.content
+```
+
+**Location:** `Backend/tiktokvoice.py:112-117`
+
+## Response Format
+
+The API returns base64-encoded audio:
+
+```json
+{
+  "data": "data:audio/mpeg;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2Z..."
+}
+```
+
+MoneyPrinter extracts the base64 data:
+
+```python
+if current_endpoint == 0:
+    audio_base64_data = str(audio).split('"')[5]
+else:
+    audio_base64_data = str(audio).split('"')[3].split(",")[1]
+```
+
+## Saving Audio Files
+
+```python
+def save_audio_file(base64_data: str, filename: str = "output.mp3") -> None:
+    """Save base64-encoded audio to an MP3 file."""
+    audio_bytes = base64.b64decode(base64_data)
+    with open(filename, "wb") as file:
+        file.write(audio_bytes)
+```
+
+**Location:** `Backend/tiktokvoice.py:105-108`
+
+## Usage Example
+
+```python
+from Backend.tiktokvoice import tts, VOICES
+
+# Generate TTS audio
+tts(
+    text="Welcome to this video about space exploration. Today we'll learn about the Mars rover mission.",
+    voice="en_us_001",
+    filename="voiceover.mp3",
+    play_sound=False
+)
+
+print("Audio generated: voiceover.mp3")
+
+# List all available voices
+print(f"Available voices: {len(VOICES)}")
+for voice in VOICES:
+    print(f"  - {voice}")
+```
+
+## Error Handling
+
+The TTS function validates inputs and handles API failures:
+
+```python
+# Check service availability
+if get_api_response().status_code == 200:
+    log("[+] TikTok TTS Service available!", "success")
+else:
+    # Try fallback endpoint
+    current_endpoint = (current_endpoint + 1) % 2
+    if get_api_response().status_code == 200:
+        log("[+] TTS Service available!", "success")
+    else:
+        log("[-] TTS Service not available and probably temporarily rate limited", "error")
+        return
+
+# Validate voice
+if voice not in VOICES:
+    log("[-] Voice not available", "error")
+    return
+
+# Validate text
+if not text:
+    log("[-] Please specify a text", "error")
+    return
+```
+
+### Common Errors
+
+- **Voice Not Available:** Invalid voice ID provided
+- **Service Unavailable:** TikTok API is down or rate-limited
+- **Empty Text:** No text provided for synthesis
+- **Rate Limiting:** Too many requests in a short time period
+
+<Note>
+TikTok's TTS service is unofficial and may have rate limits or occasional downtime. For production use, consider implementing retry logic or alternative TTS providers.
+</Note>
+
+## Service Availability Check
+
+```python
+def get_api_response() -> requests.Response:
+    """Check if the TTS service is available."""
+    url = f'{ENDPOINTS[current_endpoint].split("/a")[0]}'
+    response = requests.get(url)
+    return response
+```
+
+**Location:** `Backend/tiktokvoice.py:98-101`
+
+## Integration with Pipeline
+
+The TTS audio is integrated into the final video:
+
+1. **Generate TTS:** `tts()` creates MP3 from script
+2. **Generate Subtitles:** `generate_subtitles()` syncs text to audio
+3. **Add to Video:** `generate_video()` combines audio with visuals
+
+See [Video Composition](/pipeline/video-composition) for how the audio is added to the final video.
+
+## Performance Considerations
+
+- **Text Length:** Texts >300 chars use threading (faster but more API calls)
+- **Network Latency:** API response time typically 1-3 seconds per chunk
+- **Rate Limits:** Unknown official limits, but failures occur with rapid requests
+- **File Size:** MP3 files are ~1MB per minute of audio
+
+<Tip>
+For very long scripts, consider pre-splitting text at sentence boundaries to improve audio quality and reduce threading overhead.
+</Tip>

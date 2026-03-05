@@ -1,0 +1,201 @@
+---
+title: Upload Background Music
+description: Upload MP3 files for background music in generated videos
+---
+
+## POST /api/upload-songs
+
+Uploads MP3 files to use as background music in video generation. Uploaded songs replace any previously uploaded music.
+
+### Request
+
+This endpoint accepts `multipart/form-data` with one or more MP3 files.
+
+<ParamField body="songs" type="file[]" required>
+  One or more MP3 audio files to upload.
+  
+  **Requirements:**
+  - File format: MP3 only (`.mp3` extension)
+  - Multiple files can be uploaded in a single request
+  - All previously uploaded songs are deleted when new songs are uploaded
+</ParamField>
+
+### Response
+
+<ResponseField name="status" type="string">
+  `"success"` if at least one MP3 file was uploaded successfully, `"error"` otherwise.
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Human-readable message describing the result.
+  
+  Examples:
+  - `"Uploaded 3 song(s)."`
+  - `"No files uploaded."`
+  - `"No MP3 files found."`
+</ResponseField>
+
+### Example Request
+
+<CodeGroup>
+
+```bash cURL
+curl -X POST http://localhost:8080/api/upload-songs \
+  -F "songs=@background1.mp3" \
+  -F "songs=@background2.mp3" \
+  -F "songs=@background3.mp3"
+```
+
+```python Python
+import requests
+
+# Upload multiple MP3 files
+files = [
+    ('songs', ('background1.mp3', open('background1.mp3', 'rb'), 'audio/mpeg')),
+    ('songs', ('background2.mp3', open('background2.mp3', 'rb'), 'audio/mpeg')),
+    ('songs', ('background3.mp3', open('background3.mp3', 'rb'), 'audio/mpeg')),
+]
+
+response = requests.post(
+    "http://localhost:8080/api/upload-songs",
+    files=files
+)
+
+print(response.json()["message"])
+```
+
+```javascript JavaScript
+const formData = new FormData();
+formData.append('songs', file1); // File object from input
+formData.append('songs', file2);
+formData.append('songs', file3);
+
+const response = await fetch('http://localhost:8080/api/upload-songs', {
+  method: 'POST',
+  body: formData
+});
+
+const data = await response.json();
+console.log(data.message);
+```
+
+</CodeGroup>
+
+### Example Response (Success)
+
+```json
+{
+  "status": "success",
+  "message": "Uploaded 3 song(s)."
+}
+```
+
+### Error Responses
+
+#### No Files Provided
+
+```json
+{
+  "status": "error",
+  "message": "No files uploaded."
+}
+```
+
+HTTP Status: `400 Bad Request`
+
+#### No MP3 Files Found
+
+When files are uploaded but none have the `.mp3` extension:
+
+```json
+{
+  "status": "error",
+  "message": "No MP3 files found."
+}
+```
+
+HTTP Status: `400 Bad Request`
+
+#### Server Error
+
+```json
+{
+  "status": "error",
+  "message": "Error description"
+}
+```
+
+HTTP Status: `500 Internal Server Error`
+
+## Usage Flow
+
+1. **Upload background music files:**
+   ```bash
+   curl -X POST http://localhost:8080/api/upload-songs \
+     -F "songs=@music1.mp3" \
+     -F "songs=@music2.mp3"
+   ```
+
+2. **Generate a video with music:**
+   ```bash
+   curl -X POST http://localhost:8080/api/generate \
+     -H "Content-Type: application/json" \
+     -d '{
+       "videoSubject": "Nature documentary",
+       "useMusic": true
+     }'
+   ```
+
+<Note>
+  The video generator will randomly select one of the uploaded MP3 files as background music when `useMusic: true` is set.
+</Note>
+
+## Important Notes
+
+<Warning>
+  **Destructive Operation**
+  
+  Uploading new songs **deletes all previously uploaded songs**. The `Songs/` directory is cleared before saving new files.
+</Warning>
+
+### File Requirements
+
+- **Format:** Only MP3 files are accepted (checked by file extension)
+- **Size:** No explicit size limit, but very large files may cause upload timeouts
+- **Naming:** Filenames are sanitized using `os.path.basename()` for security
+
+### Storage Location
+
+Uploaded files are stored in the `Songs/` directory in the MoneyPrinter root:
+
+```
+MoneyPrinter/
+├── Backend/
+├── Frontend/
+├── Songs/           # Uploaded MP3 files stored here
+│   ├── background1.mp3
+│   ├── background2.mp3
+│   └── background3.mp3
+└── ...
+```
+
+## Troubleshooting
+
+### "No MP3 files found" Error
+
+This error occurs when uploaded files don't have the `.mp3` extension. Ensure all files:
+- Have the `.mp3` extension (case-insensitive)
+- Are actual MP3 audio files (not renamed from other formats)
+
+### Permission Errors
+
+If uploads fail with permission errors:
+
+```bash
+# Ensure the Songs directory is writable
+chmod 755 Songs/
+```
+
+### Large File Uploads
+
+For very large MP3 files, you may need to increase Flask's upload size limit. The default limit should be sufficient for typical background music files.

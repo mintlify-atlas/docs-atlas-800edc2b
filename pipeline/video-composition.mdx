@@ -1,0 +1,468 @@
+---
+title: Video Composition
+description: Assembling stock videos, audio, and subtitles into the final video
+icon: film
+---
+
+MoneyPrinter uses MoviePy to combine stock videos, TTS audio, and subtitles into a polished final video. The composition pipeline handles video resizing, cropping, concatenation, and overlay rendering.
+
+## Core Functions
+
+Two main functions handle video composition:
+
+### 1. Combine Videos
+
+```python
+def combine_videos(
+    video_paths: List[str], 
+    max_duration: int, 
+    max_clip_duration: int, 
+    threads: int
+) -> str:
+    """
+    Combines a list of videos into one video and returns the path to the combined video.
+    
+    Args:
+        video_paths (List): A list of paths to the videos to combine.
+        max_duration (int): The maximum duration of the combined video.
+        max_clip_duration (int): The maximum duration of each clip.
+        threads (int): The number of threads to use for video processing.
+    
+    Returns:
+        str: The path to the combined video.
+    """
+```
+
+**Location:** `Backend/video.py:162-265`
+
+### 2. Generate Video
+
+```python
+def generate_video(
+    combined_video_path: str,
+    tts_path: str,
+    subtitles_path: str,
+    threads: int,
+    subtitles_position: str,
+    text_color: str,
+) -> str:
+    """
+    This function creates the final video, with subtitles and audio.
+    
+    Args:
+        combined_video_path (str): The path to the combined video.
+        tts_path (str): The path to the text-to-speech audio.
+        subtitles_path (str): The path to the subtitles.
+        threads (int): The number of threads to use for video processing.
+        subtitles_position (str): The position of the subtitles.
+        text_color (str): The color of subtitle text.
+    
+    Returns:
+        str: The path to the final video.
+    """
+```
+
+**Location:** `Backend/video.py:268-345`
+
+## How It Works
+
+<Steps>
+  <Step title="Download Stock Videos">
+    Stock video URLs are downloaded to the temp directory using `save_video()`.
+  </Step>
+  
+  <Step title="Combine Videos">
+    Videos are cropped to 9:16 aspect ratio, resized to 1080x1920, and concatenated.
+  </Step>
+  
+  <Step title="Generate Subtitles">
+    Subtitles are created from the audio and saved as an SRT file.
+  </Step>
+  
+  <Step title="Add Audio and Subtitles">
+    The final video is rendered with TTS audio and burned-in subtitles.
+  </Step>
+</Steps>
+
+## Video Downloading
+
+Stock videos are downloaded from URLs:
+
+```python
+def save_video(video_url: str, directory: str = str(TEMP_DIR)) -> str:
+    """
+    Saves a video from a given URL and returns the path to the video.
+    
+    Args:
+        video_url (str): The URL of the video to save.
+        directory (str): The path of the temporary directory to save the video to.
+    
+    Returns:
+        str: The path to the saved video.
+    """
+    destination = Path(directory).expanduser().resolve()
+    destination.mkdir(parents=True, exist_ok=True)
+    video_id = uuid.uuid4()
+    video_path = destination / f"{video_id}.mp4"
+    with open(video_path, "wb") as f:
+        f.write(requests.get(video_url).content)
+    return str(video_path)
+```
+
+**Location:** `Backend/video.py:28-46`
+
+<Note>
+Videos are saved with UUID filenames to avoid conflicts and simplify cleanup.
+</Note>
+
+## Video Combination
+
+### Duration Calculation
+
+Each clip's duration is calculated based on the number of clips:
+
+```python
+# Required duration of each clip
+req_dur = max_duration / len(video_paths)
+
+log("[+] Combining videos...", "info")
+log(f"[+] Each clip will be maximum {req_dur} seconds long.", "info")
+```
+
+### Aspect Ratio Cropping
+
+Videos are cropped to 9:16 (vertical) format for YouTube Shorts/TikTok:
+
+```python
+# Not all videos are same size, so we need to resize them
+if round((clip.w / clip.h), 4) < 0.5625:
+    # Video is too tall, crop height
+    clip = clip.cropped(
+        width=clip.w,
+        height=round(clip.w / 0.5625),
+        x_center=clip.w / 2,
+        y_center=clip.h / 2,
+    )
+else:
+    # Video is too wide, crop width
+    clip = clip.cropped(
+        width=round(0.5625 * clip.h),
+        height=clip.h,
+        x_center=clip.w / 2,
+        y_center=clip.h / 2,
+    )
+# Resize to standard 1080x1920
+clip = clip.resized(new_size=(1080, 1920))
+```
+
+**Location:** `Backend/video.py:221-237`
+
+<Tip>
+The aspect ratio 0.5625 = 9/16, which is the standard vertical video format used by TikTok, Instagram Reels, and YouTube Shorts.
+</Tip>
+
+### Loop Until Target Duration
+
+The combination logic loops through videos until reaching the target duration:
+
+```python
+clips = []
+tot_dur = 0
+
+# Add downloaded clips over and over until the duration of the audio has been reached
+while tot_dur < (max_duration - FRAME_EPSILON):
+    progressed = False
+    for video_path in video_paths:
+        remaining = max_duration - tot_dur
+        if remaining <= FRAME_EPSILON:
+            break
+        
+        clip = VideoFileClip(video_path)
+        clip = clip.without_audio()
+        
+        # Calculate target duration
+        target_duration = min(req_dur, max_clip_duration, remaining)
+        target_duration = min(target_duration, clip.duration - FRAME_EPSILON)
+        
+        if target_duration > 0:
+            if target_duration < clip.duration:
+                clip = clip.subclipped(0, target_duration)
+            clips.append(clip)
+            tot_dur += clip.duration
+            progressed = True
+    
+    if not progressed:
+        raise RuntimeError("Could not reach target duration from source videos.")
+```
+
+**Location:** `Backend/video.py:193-244`
+
+<Warning>
+If source videos are too short to reach `max_duration`, the function will loop through them multiple times. Ensure you have enough unique footage or the video will appear repetitive.
+</Warning>
+
+### Frame Epsilon
+
+A small epsilon prevents frame overread errors:
+
+```python
+FRAME_EPSILON = 1 / 120  # ~0.008 seconds
+```
+
+This ensures clips don't exceed their actual duration by a single frame.
+
+### Concatenation
+
+Clips are concatenated using MoviePy:
+
+```python
+final_clip = concatenate_videoclips(clips, method="compose")
+final_clip = final_clip.with_fps(30).with_duration(max_duration)
+
+final_clip.write_videofile(
+    str(combined_video_path),
+    threads=threads,
+    fps=30,
+    codec="libx264",
+    preset="medium",
+    audio=False,
+)
+```
+
+**Location:** `Backend/video.py:249-259`
+
+<Note>
+The combined video has no audio at this stage. Audio is added in `generate_video()`.
+</Note>
+
+## Final Video Generation
+
+### Subtitle Rendering
+
+Subtitles are rendered using a custom text clip generator:
+
+```python
+# Make a generator that returns a TextClip when called with consecutive subtitles
+font_path = str((FONTS_DIR / "bold_font.ttf").resolve())
+generator = lambda txt: TextClip(
+    font=font_path,
+    text=txt,
+    font_size=100,
+    color=text_color,
+    stroke_color="black",
+    stroke_width=5,
+)
+```
+
+**Location:** `Backend/video.py:290-298`
+
+### Subtitle Positioning
+
+Subtitles can be positioned at various locations:
+
+```python
+# Split the subtitles position into horizontal and vertical
+horizontal_subtitles_position, vertical_subtitles_position = (
+    subtitles_position.split(",")
+)
+
+# Burn the subtitles into the video
+subtitles = SubtitlesClip(subtitles_path, make_textclip=generator)
+subtitle_vertical_position = vertical_subtitles_position
+if vertical_subtitles_position == "top":
+    subtitle_vertical_position = 80
+```
+
+**Location:** `Backend/video.py:300-309`
+
+Common positions:
+- `center,center` - Center of screen
+- `center,top` - Top of screen (80px from top)
+- `center,bottom` - Bottom of screen
+
+### Compositing
+
+The final video is composed of base video + subtitles:
+
+```python
+base_video = VideoFileClip(str(combined_video_path))
+audio = AudioFileClip(tts_path)
+target_duration = min(base_video.duration, audio.duration)
+
+result = CompositeVideoClip(
+    [
+        base_video.subclipped(0, target_duration),
+        subtitles.with_position(
+            (horizontal_subtitles_position, subtitle_vertical_position)
+        ).with_duration(target_duration),
+    ]
+)
+
+# Add audio track
+result = result.with_audio(audio.subclipped(0, target_duration)).with_duration(
+    target_duration
+)
+```
+
+**Location:** `Backend/video.py:311-327`
+
+### Export Settings
+
+```python
+result.write_videofile(
+    str(output_path),
+    threads=threads or 2,
+    fps=30,
+    codec="libx264",
+    audio_codec="aac",
+    preset="medium",
+)
+```
+
+**Location:** `Backend/video.py:331-338`
+
+**Export Settings:**
+- **FPS:** 30 frames per second
+- **Video Codec:** H.264 (libx264)
+- **Audio Codec:** AAC
+- **Preset:** Medium (balance of speed/quality)
+- **Resolution:** 1080x1920 (9:16 vertical)
+
+<Tip>
+For faster rendering, use `preset="fast"`. For higher quality, use `preset="slow"`. The `medium` preset is a good balance.
+</Tip>
+
+## Usage Example
+
+```python
+from Backend.video import combine_videos, generate_video
+from Backend.search import search_for_stock_videos
+from Backend.tiktokvoice import tts
+from Backend.video import save_video, generate_subtitles
+
+# 1. Search and download videos
+video_urls = search_for_stock_videos(
+    query="space exploration",
+    api_key="YOUR_API_KEY",
+    it=3,
+    min_dur=5
+)
+
+video_paths = [save_video(url) for url in video_urls]
+
+# 2. Generate TTS audio
+tts(
+    text="Welcome to this video about space exploration.",
+    voice="en_us_001",
+    filename="audio.mp3"
+)
+
+# 3. Combine videos
+combined_video = combine_videos(
+    video_paths=video_paths,
+    max_duration=30,
+    max_clip_duration=10,
+    threads=4
+)
+
+# 4. Generate subtitles
+subtitles_path = generate_subtitles(
+    audio_path="audio.mp3",
+    sentences=["Welcome to this video about space exploration."],
+    audio_clips=[AudioFileClip("audio.mp3")],
+    voice="en_us_001"
+)
+
+# 5. Generate final video
+final_video = generate_video(
+    combined_video_path=combined_video,
+    tts_path="audio.mp3",
+    subtitles_path=subtitles_path,
+    threads=4,
+    subtitles_position="center,bottom",
+    text_color="white"
+)
+
+print(f"Final video: {final_video}")
+```
+
+## Resource Cleanup
+
+MoviePy clips are closed after use to free memory:
+
+```python
+try:
+    final_clip.write_videofile(...)
+finally:
+    final_clip.close()
+    for clip in clips:
+        clip.close()
+```
+
+<Warning>
+Always close VideoFileClip and AudioFileClip objects when done. Failing to do so can cause memory leaks and file lock issues on Windows.
+</Warning>
+
+## MoviePy Operations Used
+
+### Video Operations
+- `VideoFileClip()` - Load video from file
+- `.without_audio()` - Remove audio track
+- `.subclipped(start, end)` - Extract portion of video
+- `.with_fps(fps)` - Set frame rate
+- `.cropped()` - Crop video to specific dimensions
+- `.resized()` - Resize video resolution
+- `.with_duration()` - Set exact duration
+
+### Audio Operations
+- `AudioFileClip()` - Load audio from file
+- `.subclipped(start, end)` - Extract portion of audio
+
+### Composition Operations
+- `concatenate_videoclips()` - Join multiple clips sequentially
+- `CompositeVideoClip()` - Overlay multiple clips
+- `SubtitlesClip()` - Create subtitle overlay from SRT file
+- `.with_position()` - Position overlay at specific coordinates
+
+## Performance Considerations
+
+- **Thread Count:** More threads = faster rendering, but diminishing returns after 4-6 threads
+- **Preset:** `fast` > `medium` > `slow` (speed vs quality tradeoff)
+- **Resolution:** 1080x1920 is optimal for mobile-first content
+- **Codec:** H.264 is widely compatible and efficient
+- **Memory Usage:** Each open clip consumes RAM; close clips promptly
+
+<Note>
+Rendering a 60-second video typically takes 30-120 seconds depending on CPU, thread count, and preset.
+</Note>
+
+## Error Handling
+
+### Common Errors
+
+- **No source videos:** Raises `ValueError` if `video_paths` is empty
+- **Can't reach target duration:** Raises `RuntimeError` if videos are too short
+- **No valid clips:** Raises `RuntimeError` if all clips are filtered out
+- **File not found:** MoviePy raises `OSError` if paths are invalid
+
+### Duration Mismatches
+
+The final video duration is clamped to the shortest of video/audio:
+
+```python
+target_duration = min(base_video.duration, audio.duration)
+```
+
+This prevents audio overrun or video overrun errors.
+
+## Integration with Pipeline
+
+Video composition is the final stage:
+
+1. **Script Generation** → AI generates script
+2. **Voice Synthesis** → TTS creates audio
+3. **Video Search** → Pexels finds stock videos
+4. **Subtitle Generation** → Audio transcribed to SRT
+5. **Video Composition** → Everything combined into final video ✓
+
+See [Subtitles](/pipeline/subtitles) for the subtitle generation process.

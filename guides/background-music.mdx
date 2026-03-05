@@ -1,0 +1,391 @@
+---
+title: Background Music
+description: Learn how to add background music to your MoneyPrinter videos.
+---
+
+# Background Music
+
+Add background music to your generated videos to enhance engagement and production value.
+
+## Quick Start
+
+<Steps>
+  <Step title="Add MP3 files to Songs/ directory">
+    Place your music files in the `Songs/` folder:
+
+    ```bash
+    MoneyPrinter/
+    ├── Songs/
+    │   ├── upbeat_track.mp3
+    │   ├── chill_ambient.mp3
+    │   └── energetic_beat.mp3
+    ```
+  </Step>
+
+  <Step title="Enable background music">
+    In the UI, toggle "Background Music" on.
+
+    Or via API:
+
+    ```json
+    {
+      "videoSubject": "Tech News",
+      "useMusic": true
+    }
+    ```
+  </Step>
+
+  <Step title="Generate video">
+    MoneyPrinter will:
+    1. Choose a random song from `Songs/`
+    2. Loop the song to match video duration
+    3. Mix at 10% volume with voice audio
+    4. Render the final video with music
+  </Step>
+</Steps>
+
+## How It Works
+
+### Song Selection
+
+Random selection from available MP3 files:
+
+```python Backend/utils.py
+def choose_random_song() -> Optional[str]:
+    try:
+        if not SONGS_DIR.exists():
+            return None
+
+        songs = [
+            song
+            for song in SONGS_DIR.iterdir()
+            if song.is_file() and song.suffix.lower() == ".mp3"
+        ]
+
+        if not songs:
+            return None
+
+        song = random.choice(songs)
+        logger.info(colored(f"Chose song: {song}", "green"))
+        return str(song)
+    except Exception as e:
+        logger.error(
+            colored(f"Error occurred while choosing random song: {str(e)}", "red")
+        )
+```
+
+### Audio Mixing
+
+The pipeline mixes music with the voice audio:
+
+```python Backend/pipeline.py
+if use_music:
+    song_path = choose_random_song()
+    
+    if not song_path:
+        emit(
+            "[-] Could not find songs in Songs/. Continuing without background music.",
+            "warning",
+        )
+        use_music = False
+
+    if use_music:
+        video_clip = VideoFileClip(rendered_video_path)
+        song_clip = AudioFileClip(song_path).with_fps(44100)
+        
+        # Loop song to match video duration
+        original_duration = video_clip.duration
+        song_clip = song_clip.with_effects(
+            [afx.AudioLoop(duration=original_duration)]
+        )
+        
+        # Reduce volume to 10%
+        song_clip = song_clip.with_volume_scaled(0.1).with_fps(44100)
+        
+        # Mix audio tracks
+        original_audio = video_clip.audio
+        mixed_audio = CompositeAudioClip(
+            [original_audio, song_clip]
+        ).with_duration(original_duration)
+```
+
+### Volume Levels
+
+- **Voice audio**: 100% (original TTS volume)
+- **Background music**: 10% (0.1x volume scaling)
+
+This ensures the narration remains clear and prominent.
+
+## Music Requirements
+
+### File Format
+
+<Note>
+**Only MP3 files** are supported. Other formats (WAV, M4A, FLAC) are ignored.
+</Note>
+
+### Recommendations
+
+| Attribute | Recommendation | Why |
+|-----------|----------------|-----|
+| **Format** | MP3 | Universal support, small file size |
+| **Bitrate** | 128-192 kbps | Good quality, manageable size |
+| **Sample Rate** | 44.1 kHz | Standard audio rate |
+| **Duration** | Any | Automatically looped to match video |
+| **Genre** | Instrumental | Doesn't compete with narration |
+| **Mood** | Matches content | Enhances video tone |
+
+### Copyright Considerations
+
+<Warning>
+**Important**: Only use royalty-free music or music you have rights to use.
+</Warning>
+
+Royalty-free music sources:
+- [YouTube Audio Library](https://www.youtube.com/audiolibrary)
+- [Incompetech](https://incompetech.com/music/royalty-free/)
+- [Free Music Archive](https://freemusicarchive.org/)
+- [Bensound](https://www.bensound.com/)
+- [Pixabay Music](https://pixabay.com/music/)
+
+## Upload Songs via API
+
+Upload songs programmatically:
+
+```bash
+curl -X POST http://localhost:8080/api/upload-songs \
+  -F "songs=@track1.mp3" \
+  -F "songs=@track2.mp3" \
+  -F "songs=@track3.mp3"
+```
+
+Response:
+
+```json
+{
+  "status": "success",
+  "message": "Uploaded 3 song(s)."
+}
+```
+
+The endpoint implementation:
+
+```python Backend/main.py
+@app.route("/api/upload-songs", methods=["POST"])
+def upload_songs():
+    try:
+        files = request.files.getlist("songs")
+        if not files:
+            return jsonify({"status": "error", "message": "No files uploaded."}), 400
+
+        clean_dir(str(SONGS_DIR))  # Remove existing songs
+        saved = 0
+        for file_item in files:
+            if file_item.filename and file_item.filename.lower().endswith(".mp3"):
+                safe_name = os.path.basename(file_item.filename)
+                file_item.save(str(SONGS_DIR / safe_name))
+                saved += 1
+
+        if saved == 0:
+            return jsonify({"status": "error", "message": "No MP3 files found."}), 400
+
+        log(f"[+] Uploaded {saved} song(s) to {SONGS_DIR}", "success")
+        return jsonify({"status": "success", "message": f"Uploaded {saved} song(s)."})
+    except Exception as err:
+        log(f"[-] Error uploading songs: {str(err)}", "error")
+        return jsonify({"status": "error", "message": str(err)}), 500
+```
+
+<Warning>
+`upload-songs` **clears the Songs/ directory** before uploading new files.
+</Warning>
+
+## Audio Rendering
+
+### FFmpeg Remux (Preferred)
+
+Fast audio replacement using FFmpeg:
+
+```python Backend/pipeline.py
+subprocess.run(
+    [
+        "ffmpeg",
+        "-y",
+        "-i", rendered_video_path,
+        "-i", mixed_audio_path,
+        "-map", "0:v:0",  # Video stream from first input
+        "-map", "1:a:0",  # Audio stream from second input
+        "-c:v", "copy",   # Copy video codec (no re-encode)
+        "-c:a", "aac",    # AAC audio codec
+        "-b:a", "192k",   # Audio bitrate
+        "-shortest",      # Match shortest stream
+        final_output_path,
+    ],
+    check=True,
+    capture_output=True,
+    text=True,
+)
+```
+
+Benefits:
+- **Fast**: No video re-encoding
+- **Quality**: Preserves video quality
+- **Small**: Minimal CPU usage
+
+### MoviePy Fallback
+
+If FFmpeg remux fails:
+
+```python Backend/pipeline.py
+except Exception:
+    emit(
+        "[!] ffmpeg remux failed. Falling back to MoviePy render for music mix.",
+        "warning",
+    )
+    video_clip = VideoFileClip(rendered_video_path)
+    song_clip = AudioFileClip(song_path).with_fps(44100)
+    
+    # Mix audio
+    comp_audio = CompositeAudioClip([video_clip.audio, song_clip])
+    video_clip = video_clip.with_audio(comp_audio)
+    
+    # Re-encode entire video
+    video_clip.write_videofile(
+        final_output_path,
+        threads=render_threads,
+        fps=30,
+        codec="libx264",
+        audio_codec="aac",
+        preset="medium",
+    )
+```
+
+<Info>
+MoviePy fallback is slower but more reliable for complex scenarios.
+</Info>
+
+## Customizing Music
+
+### Change Volume
+
+Edit `Backend/pipeline.py` to adjust music volume:
+
+```python
+# Default: 10%
+song_clip = song_clip.with_volume_scaled(0.1)
+
+# Louder: 20%
+song_clip = song_clip.with_volume_scaled(0.2)
+
+# Quieter: 5%
+song_clip = song_clip.with_volume_scaled(0.05)
+```
+
+### Fade In/Out
+
+Add fade effects:
+
+```python
+from moviepy import afx
+
+song_clip = song_clip.with_effects([
+    afx.AudioFadeIn(1.0),   # 1-second fade in
+    afx.AudioFadeOut(1.0),  # 1-second fade out
+])
+```
+
+### Specific Song Selection
+
+Modify song selection logic to use specific tracks:
+
+```python Backend/pipeline.py
+# Instead of random selection:
+song_path = str(SONGS_DIR / "my_favorite_track.mp3")
+if not Path(song_path).exists():
+    emit("Specific song not found. Using random.", "warning")
+    song_path = choose_random_song()
+```
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="No music in generated video">
+    **Check Songs/ directory**:
+
+    ```bash
+    ls -la Songs/
+    ```
+
+    Ensure:
+    - Directory exists
+    - Contains at least one `.mp3` file
+    - Files are readable
+
+    **Check logs**:
+
+    ```
+    [-] Could not find songs in Songs/. Continuing without background music.
+    ```
+  </Accordion>
+
+  <Accordion title="Music too loud / too quiet">
+    **Adjust volume** in `Backend/pipeline.py`:
+
+    ```python
+    # Current: 10%
+    song_clip = song_clip.with_volume_scaled(0.1)
+    
+    # Change to 15%:
+    song_clip = song_clip.with_volume_scaled(0.15)
+    ```
+  </Accordion>
+
+  <Accordion title="FFmpeg remux fails">
+    **Error message**:
+
+    ```
+    [!] ffmpeg remux failed. Falling back to MoviePy render for music mix.
+    ```
+
+    **Causes**:
+    - Incompatible codec
+    - Corrupted audio file
+    - FFmpeg not in PATH
+
+    **Solution**: MoviePy automatically handles the fallback. Video will take longer to render.
+  </Accordion>
+
+  <Accordion title="Music cuts off early">
+    **Cause**: Music file shorter than video.
+
+    **Solution**: The pipeline automatically loops music:
+
+    ```python
+    song_clip = song_clip.with_effects(
+        [afx.AudioLoop(duration=video_duration)]
+    )
+    ```
+
+    Ensure this line is present in `Backend/pipeline.py`.
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Generating Videos" icon="video" href="/guides/generating-videos">
+    Complete video generation guide
+  </Card>
+  
+  <Card title="YouTube Upload" icon="youtube" href="/guides/youtube-upload">
+    Automate YouTube uploads
+  </Card>
+  
+  <Card title="Pipeline" icon="diagram-project" href="/concepts/pipeline">
+    Video generation pipeline details
+  </Card>
+  
+  <Card title="Troubleshooting" icon="wrench" href="/development/troubleshooting">
+    Common issues and solutions
+  </Card>
+</CardGroup>

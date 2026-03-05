@@ -1,0 +1,340 @@
+---
+title: Configuration
+description: Complete reference for MoneyPrinter environment variables and configuration options.
+---
+
+# Configuration
+
+MoneyPrinter reads configuration from a `.env` file in the project root. Use `.env.example` as your starting template.
+
+## Environment File
+
+Create your configuration file:
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` with your preferred text editor:
+
+```bash .env
+# Required API Keys
+TIKTOK_SESSION_ID=""
+PEXELS_API_KEY=""
+
+# Optional Configuration
+IMAGEMAGICK_BINARY=""
+OLLAMA_BASE_URL="http://localhost:11434"
+OLLAMA_MODEL="llama3.1:8b"
+ASSEMBLY_AI_API_KEY=""
+
+# Database (Docker)
+POSTGRES_DB="moneyprinter"
+POSTGRES_USER="moneyprinter"
+POSTGRES_PASSWORD="moneyprinter"
+DATABASE_URL=""
+```
+
+## Required Variables
+
+### TIKTOK_SESSION_ID
+
+**Description**: TikTok session cookie used for text-to-speech API calls.
+
+**How to obtain**:
+
+<Steps>
+  <Step title="Log into TikTok">
+    Open [tiktok.com](https://www.tiktok.com) in your browser and log in.
+  </Step>
+  
+  <Step title="Open Developer Tools">
+    Press `F12` or right-click and select "Inspect Element".
+  </Step>
+  
+  <Step title="Navigate to Cookies">
+    Go to **Application** → **Cookies** → `https://www.tiktok.com`.
+  </Step>
+  
+  <Step title="Copy sessionid">
+    Find the `sessionid` cookie and copy its value.
+  </Step>
+</Steps>
+
+```bash .env
+TIKTOK_SESSION_ID="abc123def456..."
+```
+
+<Warning>
+The session ID may expire periodically. If TTS fails with authentication errors, refresh this value.
+</Warning>
+
+### PEXELS_API_KEY
+
+**Description**: API key for fetching stock video clips from Pexels.
+
+**How to obtain**:
+
+<Steps>
+  <Step title="Create Pexels account">
+    Sign up at [pexels.com/api](https://www.pexels.com/api/).
+  </Step>
+  
+  <Step title="Generate API key">
+    Navigate to your API dashboard and generate a new key.
+  </Step>
+</Steps>
+
+```bash .env
+PEXELS_API_KEY="your_pexels_api_key_here"
+```
+
+<Info>
+Pexels offers a generous free tier (200 requests/hour). No credit card required.
+</Info>
+
+## Optional Variables
+
+### IMAGEMAGICK_BINARY
+
+**Description**: Absolute path to the ImageMagick executable.
+
+**Default**: Auto-detect from `PATH`
+
+The backend auto-detects ImageMagick on startup:
+
+```python Backend/utils.py
+def resolve_imagemagick_binary() -> Optional[str]:
+    configured_binary = os.getenv("IMAGEMAGICK_BINARY", "").strip().strip('"')
+    if configured_binary:
+        expanded = Path(configured_binary).expanduser()
+        if expanded.exists():
+            return str(expanded.resolve())
+
+    candidate_names = [
+        "magick",
+        "magick.exe",
+        "convert",
+        "convert.exe",
+    ]
+
+    for candidate in candidate_names:
+        found = shutil.which(candidate)
+        if found:
+            return found
+
+    return None
+```
+
+If auto-detection fails, set the path explicitly:
+
+<CodeGroup>
+```bash Linux/macOS
+IMAGEMAGICK_BINARY="/usr/local/bin/magick"
+```
+
+```bash Windows
+IMAGEMAGICK_BINARY="C:\\Program Files\\ImageMagick-7.1.1-Q16-HDRI\\magick.exe"
+```
+</CodeGroup>
+
+<Warning>
+Windows paths must use double backslashes (`\\`) or forward slashes (`/`).
+</Warning>
+
+### OLLAMA_BASE_URL
+
+**Description**: Base URL of the Ollama server for model listing and chat generation.
+
+**Default**: `http://localhost:11434`
+
+Used by the Ollama client:
+
+```python Backend/gpt.py
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
+
+def _ollama_client() -> Client:
+    return Client(host=OLLAMA_BASE_URL, timeout=OLLAMA_TIMEOUT)
+```
+
+**Examples**:
+
+```bash .env
+# Local Ollama
+OLLAMA_BASE_URL="http://localhost:11434"
+
+# Docker backend connecting to host Ollama
+OLLAMA_BASE_URL="http://host.docker.internal:11434"
+
+# Remote Ollama server
+OLLAMA_BASE_URL="http://192.168.1.100:11434"
+```
+
+### OLLAMA_MODEL
+
+**Description**: Fallback model name if the frontend doesn't specify one.
+
+**Default**: `llama3.1:8b`
+
+```python Backend/gpt.py
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
+
+def generate_response(prompt: str, ai_model: str) -> str:
+    model_name = (ai_model or "").strip() or OLLAMA_MODEL
+    # ...
+```
+
+Pull the model before use:
+
+```bash
+ollama pull llama3.1:8b
+```
+
+Recommended models:
+
+| Model | Size | Speed | Quality | Use Case |
+|-------|------|-------|---------|----------|
+| `llama3.1:8b` | 4.7GB | Fast | Good | General purpose |
+| `mistral:7b` | 4.1GB | Very Fast | Good | Quick iterations |
+| `llama3.1:70b` | 40GB | Slow | Excellent | Best quality (GPU required) |
+| `qwen2.5:7b` | 4.7GB | Fast | Good | Multilingual |
+
+### ASSEMBLY_AI_API_KEY
+
+**Description**: API key for AssemblyAI subtitle generation. If empty, local subtitle generation is used.
+
+**Default**: Empty (use local processing)
+
+```bash .env
+ASSEMBLY_AI_API_KEY="your_assemblyai_key_here"
+```
+
+Local vs AssemblyAI subtitles:
+
+| Feature | Local | AssemblyAI |
+|---------|-------|------------|
+| Cost | Free | Paid ($0.00025/sec) |
+| Quality | Basic | High accuracy |
+| Speed | Fast | Network latency |
+| Privacy | Fully local | Cloud upload |
+
+<Info>
+For most use cases, local subtitle generation is sufficient. AssemblyAI provides better accuracy for complex audio.
+</Info>
+
+## Database Configuration
+
+### DATABASE_URL
+
+**Description**: SQLAlchemy connection string for the job queue database.
+
+**Default**: `sqlite:///moneyprinter.db` (local file)
+
+The database is initialized on startup:
+
+```python Backend/db.py
+import os
+from sqlalchemy import create_engine
+from sqlalchemy.orm import declarative_base, sessionmaker
+
+DATABASE_URL = os.getenv(
+    "DATABASE_URL",
+    "sqlite:///moneyprinter.db"
+)
+
+engine = create_engine(DATABASE_URL)
+SessionLocal = sessionmaker(bind=engine)
+Base = declarative_base()
+```
+
+**Examples**:
+
+```bash .env
+# Local SQLite (default)
+DATABASE_URL="sqlite:///moneyprinter.db"
+
+# Docker Postgres
+DATABASE_URL="postgresql+psycopg://moneyprinter:moneyprinter@postgres:5432/moneyprinter"
+
+# External Postgres
+DATABASE_URL="postgresql+psycopg://user:pass@host:5432/dbname"
+```
+
+### POSTGRES_DB, POSTGRES_USER, POSTGRES_PASSWORD
+
+**Description**: Docker Compose Postgres service configuration.
+
+**Defaults**:
+- `POSTGRES_DB=moneyprinter`
+- `POSTGRES_USER=moneyprinter`
+- `POSTGRES_PASSWORD=moneyprinter`
+
+Used by `docker-compose.yml`:
+
+```yaml docker-compose.yml
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-moneyprinter}
+      - POSTGRES_USER=${POSTGRES_USER:-moneyprinter}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-moneyprinter}
+```
+
+<Warning>
+**Production**: Change `POSTGRES_PASSWORD` to a strong, unique password.
+</Warning>
+
+## Validation
+
+The backend validates required variables on startup:
+
+```python Backend/utils.py
+def check_env_vars() -> None:
+    required_vars = ["PEXELS_API_KEY", "TIKTOK_SESSION_ID"]
+    missing_vars = []
+    
+    for var in required_vars:
+        value = os.getenv(var)
+        if value is None or len(value) == 0:
+            missing_vars.append(var)
+
+    if missing_vars:
+        logger.error(
+            f"Missing environment variables: {', '.join(missing_vars)}"
+        )
+        sys.exit(1)
+
+    # Verify ImageMagick
+    imagemagick_binary = resolve_imagemagick_binary()
+    if not imagemagick_binary:
+        logger.error("ImageMagick not found")
+        sys.exit(1)
+```
+
+If variables are missing, the backend exits with an error:
+
+```
+ERROR: The following environment variables are missing: PEXELS_API_KEY, TIKTOK_SESSION_ID
+Please consult 'docs/configuration.md' for setup instructions.
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Generate your first video
+  </Card>
+  
+  <Card title="Docker Setup" icon="docker" href="/setup/docker">
+    Deploy with Docker Compose
+  </Card>
+  
+  <Card title="Ollama Models" icon="brain" href="/guides/ollama-models">
+    Install and select Ollama models
+  </Card>
+  
+  <Card title="Troubleshooting" icon="wrench" href="/development/troubleshooting">
+    Common configuration issues
+  </Card>
+</CardGroup>

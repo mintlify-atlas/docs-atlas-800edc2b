@@ -1,0 +1,178 @@
+---
+title: Generate Video
+description: Create a new video generation job
+---
+
+## POST /api/generate
+
+Submits a new video generation job to the queue. The job will be processed asynchronously by the worker process.
+
+### Request Body
+
+<ParamField body="videoSubject" type="string" required>
+  The subject or topic of the video. This is used to generate the script and search for relevant footage.
+  
+  Example: `"The history of artificial intelligence"`
+</ParamField>
+
+<ParamField body="voice" type="string" default="en_us_001">
+  The TikTok voice to use for narration. Available voices depend on the TikTok TTS API.
+  
+  Common options:
+  - `en_us_001` - US English (Female)
+  - `en_us_002` - US English (Male)
+  - `en_us_006` - US English (Male, Deep)
+  - `en_us_007` - US English (Female, Upbeat)
+</ParamField>
+
+<ParamField body="paragraphNumber" type="integer" default="1">
+  Number of paragraphs to generate in the script. More paragraphs result in longer videos.
+  
+  Typical range: 1-5
+</ParamField>
+
+<ParamField body="customPrompt" type="string">
+  Optional custom prompt to guide script generation. If provided, this overrides the default script generation logic.
+  
+  Example: `"Create a dramatic script about Mars colonization"`
+</ParamField>
+
+<ParamField body="aiModel" type="string">
+  The Ollama model to use for script generation. If not specified, uses the default model from `/api/models`.
+  
+  Example: `"llama3.1:8b"`
+</ParamField>
+
+<ParamField body="threads" type="integer" default="2">
+  Number of threads to use for video processing. Higher values may speed up rendering but use more CPU.
+</ParamField>
+
+<ParamField body="subtitlesPosition" type="string" default="center">
+  Vertical position of subtitles in the video.
+  
+  Options:
+  - `top`
+  - `center`
+  - `bottom`
+</ParamField>
+
+<ParamField body="color" type="string" default="white">
+  Color of subtitle text.
+  
+  Common options: `white`, `yellow`, `red`, `green`, `blue`
+</ParamField>
+
+<ParamField body="useMusic" type="boolean" default="false">
+  Whether to add background music to the video. Music files must be uploaded via `/api/upload-songs` first.
+</ParamField>
+
+<ParamField body="automateYoutubeUpload" type="boolean" default="false">
+  Whether to automatically upload the generated video to YouTube after completion.
+  
+  Requires YouTube API credentials to be configured.
+</ParamField>
+
+### Response
+
+<ResponseField name="status" type="string">
+  Always `"success"` for successful job submission.
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Human-readable message: `"Video generation queued."`
+</ResponseField>
+
+<ResponseField name="jobId" type="string">
+  Unique identifier for the generation job. Use this to poll job status and retrieve events.
+  
+  Format: UUID v4 (e.g., `"a1b2c3d4-e5f6-7890-abcd-ef1234567890"`)
+</ResponseField>
+
+### Example Request
+
+<CodeGroup>
+
+```bash cURL
+curl -X POST http://localhost:8080/api/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "videoSubject": "The benefits of meditation",
+    "voice": "en_us_001",
+    "paragraphNumber": 3,
+    "subtitlesPosition": "center",
+    "color": "yellow",
+    "useMusic": true
+  }'
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    "http://localhost:8080/api/generate",
+    json={
+        "videoSubject": "The benefits of meditation",
+        "voice": "en_us_001",
+        "paragraphNumber": 3,
+        "subtitlesPosition": "center",
+        "color": "yellow",
+        "useMusic": True
+    }
+)
+
+data = response.json()
+print(f"Job ID: {data['jobId']}")
+```
+
+```javascript JavaScript
+const response = await fetch('http://localhost:8080/api/generate', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify({
+    videoSubject: 'The benefits of meditation',
+    voice: 'en_us_001',
+    paragraphNumber: 3,
+    subtitlesPosition: 'center',
+    color: 'yellow',
+    useMusic: true
+  })
+});
+
+const data = await response.json();
+console.log(`Job ID: ${data.jobId}`);
+```
+
+</CodeGroup>
+
+### Example Response
+
+```json
+{
+  "status": "success",
+  "message": "Video generation queued.",
+  "jobId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+}
+```
+
+### Error Responses
+
+#### Missing Required Field
+
+```json
+{
+  "status": "error",
+  "message": "videoSubject is required."
+}
+```
+
+HTTP Status: `400 Bad Request`
+
+## Next Steps
+
+After submitting a generation job:
+
+1. Use the returned `jobId` to poll job status: [GET /api/jobs/:id](/api/jobs#get-apijobsid)
+2. Stream real-time progress events: [GET /api/jobs/:id/events](/api/jobs#get-apijobsidevents)
+3. Cancel the job if needed: [POST /api/jobs/:id/cancel](/api/jobs#post-apijobsidcancel)

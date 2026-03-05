@@ -1,0 +1,384 @@
+---
+title: Installation
+description: Detailed installation instructions for MoneyPrinter, including all prerequisites and system dependencies.
+---
+
+# Installation
+
+This guide covers installing all prerequisites and setting up MoneyPrinter for local development.
+
+## System Requirements
+
+- **Operating System**: Linux, macOS, or Windows
+- **Python**: 3.11 or higher
+- **Memory**: 8GB RAM minimum (16GB recommended for larger models)
+- **Storage**: 10GB+ for models and temporary video files
+
+## Prerequisites
+
+### 1. Python 3.11+
+
+Verify your Python version:
+
+```bash
+python --version
+# or
+python3 --version
+```
+
+If you need to install or upgrade Python:
+
+<CodeGroup>
+```bash Ubuntu/Debian
+sudo apt update
+sudo apt install python3.11 python3.11-venv python3-pip
+```
+
+```bash macOS (Homebrew)
+brew install python@3.11
+```
+
+```bash Windows
+# Download from python.org
+# https://www.python.org/downloads/
+```
+</CodeGroup>
+
+### 2. uv Package Manager
+
+MoneyPrinter uses [uv](https://docs.astral.sh/uv/) for fast, reliable dependency management.
+
+<CodeGroup>
+```bash Linux/macOS
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+```bash Windows (PowerShell)
+irm https://astral.sh/uv/install.ps1 | iex
+```
+
+```bash Alternative (pip)
+pip install uv
+```
+</CodeGroup>
+
+Verify installation:
+
+```bash
+uv --version
+```
+
+### 3. FFmpeg
+
+FFmpeg is required for video processing and encoding.
+
+<CodeGroup>
+```bash Ubuntu/Debian
+sudo apt update
+sudo apt install ffmpeg
+```
+
+```bash macOS (Homebrew)
+brew install ffmpeg
+```
+
+```bash Windows (Chocolatey)
+choco install ffmpeg
+```
+
+```bash Windows (Manual)
+# Download from https://ffmpeg.org/download.html
+# Add to PATH
+```
+</CodeGroup>
+
+Verify installation:
+
+```bash
+ffmpeg -version
+```
+
+### 4. ImageMagick
+
+ImageMagick is used for subtitle rendering and text overlays.
+
+<CodeGroup>
+```bash Ubuntu/Debian
+sudo apt update
+sudo apt install imagemagick
+```
+
+```bash macOS (Homebrew)
+brew install imagemagick
+```
+
+```bash Windows
+# Download from https://imagemagick.org/script/download.php
+# Install the static build (exe installer)
+# Add to PATH during installation
+```
+</CodeGroup>
+
+Verify installation:
+
+```bash
+magick --version
+# or on older versions:
+convert --version
+```
+
+<Warning>
+If ImageMagick is not auto-detected, you'll need to set `IMAGEMAGICK_BINARY` in `.env` (see [Configuration](/setup/configuration)).
+</Warning>
+
+### 5. Ollama
+
+Ollama provides local LLM inference for script generation.
+
+<CodeGroup>
+```bash Linux
+curl -fsSL https://ollama.com/install.sh | sh
+```
+
+```bash macOS
+brew install ollama
+```
+
+```bash Windows
+# Download from https://ollama.com/download/windows
+```
+</CodeGroup>
+
+Start the Ollama service:
+
+```bash
+ollama serve
+```
+
+Pull a model:
+
+```bash
+ollama pull llama3.1:8b
+```
+
+Verify available models:
+
+```bash
+ollama list
+```
+
+<Info>
+Recommended models:
+- **llama3.1:8b** - Balanced performance and quality
+- **mistral:7b** - Fast inference
+- **llama3.1:70b** - Best quality (requires high-end GPU)
+</Info>
+
+## Install MoneyPrinter
+
+### Clone Repository
+
+```bash
+git clone https://github.com/FujiwaraChoki/MoneyPrinter.git
+cd MoneyPrinter
+```
+
+### Install Python Dependencies
+
+Using uv (recommended):
+
+```bash
+uv sync
+```
+
+This reads `pyproject.toml` and installs all required packages:
+
+```toml pyproject.toml
+[project]
+name = "moneyprinter"
+version = "3.0.0"
+requires-python = ">=3.11"
+dependencies = [
+    "flask>=3.1.0",
+    "flask-cors>=5.0.0",
+    "moviepy>=2.1.1",
+    "ollama>=0.4.5",
+    "requests>=2.32.3",
+    "sqlalchemy>=2.0.36",
+    "psycopg>=3.2.3",
+    "python-dotenv>=1.0.1",
+    "termcolor>=2.5.0",
+    "pillow>=11.0.0",
+    "google-api-python-client>=2.156.0",
+    "oauth2client>=4.1.3",
+    "assemblyai>=0.35.1",
+]
+```
+
+<Accordion title="Alternative: Using pip">
+If you prefer pip over uv:
+
+```bash
+pip install -e .
+```
+</Accordion>
+
+### Create Environment File
+
+```bash
+cp .env.example .env
+```
+
+Windows PowerShell:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+See [Configuration](/setup/configuration) for details on setting required variables.
+
+## Verify Installation
+
+Run the startup checks:
+
+```bash
+uv run python Backend/main.py
+```
+
+You should see:
+
+```
+INFO: Environment variables validated
+INFO: ImageMagick found at /usr/local/bin/magick
+ * Running on http://0.0.0.0:8080
+```
+
+If you see errors about missing environment variables, edit `.env` to add:
+
+```bash
+TIKTOK_SESSION_ID="your_session_id_here"
+PEXELS_API_KEY="your_pexels_key_here"
+```
+
+## Optional: Development Dependencies
+
+To run tests and development tools:
+
+```bash
+uv sync --group dev
+```
+
+This installs additional packages defined in `pyproject.toml`:
+
+```toml pyproject.toml
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.4",
+    "pytest-cov>=6.0.0",
+]
+```
+
+Run tests:
+
+```bash
+uv run pytest
+```
+
+## Directory Structure
+
+After installation, your project should look like:
+
+```
+MoneyPrinter/
+├── Backend/          # Flask API and worker
+│   ├── main.py       # API server
+│   ├── worker.py     # Job processor
+│   ├── pipeline.py   # Video generation
+│   ├── gpt.py        # Ollama client
+│   ├── models.py     # Database models
+│   └── repository.py # Job queue logic
+├── Frontend/         # Web UI
+│   ├── index.html
+│   └── app.js
+├── fonts/            # Subtitle fonts
+├── Songs/            # Background music
+├── temp/             # Temp video files
+├── subtitles/        # Generated subtitles
+├── tests/            # Test suite
+├── .env              # Configuration
+├── pyproject.toml    # Dependencies
+└── docker-compose.yml # Docker config
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Configuration" icon="gear" href="/setup/configuration">
+    Configure environment variables and API keys
+  </Card>
+  
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Generate your first video
+  </Card>
+  
+  <Card title="Docker Setup" icon="docker" href="/setup/docker">
+    Deploy with Docker Compose
+  </Card>
+  
+  <Card title="Troubleshooting" icon="wrench" href="/development/troubleshooting">
+    Common installation issues
+  </Card>
+</CardGroup>
+
+## Common Issues
+
+<AccordionGroup>
+  <Accordion title="'uv sync' fails with dependency conflicts">
+    Ensure you're using Python 3.11+:
+
+    ```bash
+    python --version
+    ```
+
+    If you have multiple Python versions, specify explicitly:
+
+    ```bash
+    uv sync --python 3.11
+    ```
+  </Accordion>
+
+  <Accordion title="ImageMagick policy error when rendering subtitles">
+    Edit ImageMagick's policy file to enable video processing.
+
+    **Linux**: `/etc/ImageMagick-6/policy.xml` or `/etc/ImageMagick-7/policy.xml`
+
+    Find and comment out or remove this line:
+
+    ```xml
+    <policy domain="path" rights="none" pattern="@*" />
+    ```
+
+    Or add permissions for video formats:
+
+    ```xml
+    <policy domain="coder" rights="read|write" pattern="MP4" />
+    <policy domain="coder" rights="read|write" pattern="MOV" />
+    ```
+  </Accordion>
+
+  <Accordion title="Ollama connection refused">
+    Ensure Ollama is running:
+
+    ```bash
+    ollama serve
+    ```
+
+    Check if it's accessible:
+
+    ```bash
+    curl http://localhost:11434/api/tags
+    ```
+
+    If running on another machine, set `OLLAMA_BASE_URL` in `.env`.
+  </Accordion>
+</AccordionGroup>

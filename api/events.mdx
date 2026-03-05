@@ -1,0 +1,334 @@
+---
+title: Job Events
+description: Real-time progress events and logging for video generation jobs
+---
+
+## Event Overview
+
+As a video generation job progresses, the worker emits events that provide real-time feedback about what's happening. These events can be retrieved via the [GET /api/jobs/:id/events](/api/jobs#get-apijobsidevents) endpoint.
+
+## Event Structure
+
+Each event has the following structure:
+
+<ResponseField name="id" type="integer">
+  Unique, auto-incrementing event identifier. Use this for incremental polling with the `after` query parameter.
+</ResponseField>
+
+<ResponseField name="type" type="string">
+  Event type. Currently, most events use `"log"`, but the system supports custom event types.
+  
+  Common values:
+  - `log` - General progress message
+  - `error` - Error notification (also logged as level: "error")
+  - `progress` - Progress update with percentage
+</ResponseField>
+
+<ResponseField name="level" type="string">
+  Log severity level. Determines how the event should be displayed.
+  
+  Values:
+  - `info` - Informational message (e.g., "Generating script...")
+  - `success` - Success message (e.g., "Script generated successfully")
+  - `warning` - Warning message (e.g., "Fewer video clips found than requested")
+  - `error` - Error message (e.g., "Failed to fetch video clip")
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Human-readable event message. This is the primary content to display to users.
+  
+  Examples:
+  - `"Generating script..."`
+  - `"Searching for footage: mountain landscapes"`
+  - `"Rendering video with subtitles..."`
+  - `"Video generation complete"`
+</ResponseField>
+
+<ResponseField name="payload" type="object | null">
+  Optional structured data associated with the event. Contents vary by event type.
+  
+  Example payloads:
+  - `{"wordCount": 250}` - Script generation complete
+  - `{"clipCount": 5}` - Video clips downloaded
+  - `{"duration": 45.2}` - Video duration in seconds
+  - `{"progress": 0.75}` - 75% complete
+</ResponseField>
+
+<ResponseField name="timestamp" type="number">
+  Unix timestamp (seconds since epoch) when the event was created.
+  
+  Example: `1710499805.123`
+</ResponseField>
+
+## Example Events
+
+### Job Started
+
+```json
+{
+  "id": 1,
+  "type": "log",
+  "level": "info",
+  "message": "Starting video generation...",
+  "payload": null,
+  "timestamp": 1710499800.000
+}
+```
+
+### Script Generation
+
+```json
+{
+  "id": 2,
+  "type": "log",
+  "level": "info",
+  "message": "Generating script with model: llama3.1:8b",
+  "payload": {"model": "llama3.1:8b", "paragraphs": 3},
+  "timestamp": 1710499802.123
+}
+```
+
+```json
+{
+  "id": 3,
+  "type": "log",
+  "level": "success",
+  "message": "Script generated successfully",
+  "payload": {"wordCount": 250, "duration": 45.2},
+  "timestamp": 1710499815.456
+}
+```
+
+### Video Search
+
+```json
+{
+  "id": 4,
+  "type": "log",
+  "level": "info",
+  "message": "Searching for footage: artificial intelligence robots",
+  "payload": {"searchTerm": "artificial intelligence robots"},
+  "timestamp": 1710499816.789
+}
+```
+
+```json
+{
+  "id": 5,
+  "type": "log",
+  "level": "success",
+  "message": "Downloaded 5 video clips",
+  "payload": {"clipCount": 5},
+  "timestamp": 1710499830.123
+}
+```
+
+### Audio Generation
+
+```json
+{
+  "id": 6,
+  "type": "log",
+  "level": "info",
+  "message": "Generating voiceover with TikTok TTS",
+  "payload": {"voice": "en_us_001"},
+  "timestamp": 1710499831.456
+}
+```
+
+### Video Rendering
+
+```json
+{
+  "id": 7,
+  "type": "log",
+  "level": "info",
+  "message": "Rendering final video with subtitles...",
+  "payload": {"subtitlesPosition": "center", "color": "yellow"},
+  "timestamp": 1710499845.789
+}
+```
+
+### Completion
+
+```json
+{
+  "id": 8,
+  "type": "log",
+  "level": "success",
+  "message": "Video generation complete",
+  "payload": {"outputPath": "/home/user/MoneyPrinter/output.mp4"},
+  "timestamp": 1710499900.123
+}
+```
+
+### Error Event
+
+```json
+{
+  "id": 9,
+  "type": "log",
+  "level": "error",
+  "message": "Failed to generate script: Ollama connection timeout",
+  "payload": {"error": "ConnectionTimeout", "retryable": false},
+  "timestamp": 1710499820.456
+}
+```
+
+### Warning Event
+
+```json
+{
+  "id": 10,
+  "type": "log",
+  "level": "warning",
+  "message": "Only found 3 video clips, requested 5",
+  "payload": {"found": 3, "requested": 5},
+  "timestamp": 1710499835.789
+}
+```
+
+## Event Timeline
+
+A typical successful job produces events in this order:
+
+1. **Job Start** - "Starting video generation..."
+2. **Script Generation** - "Generating script with model: ..."
+3. **Script Complete** - "Script generated successfully"
+4. **Video Search** - "Searching for footage: ..."
+5. **Clips Downloaded** - "Downloaded N video clips"
+6. **Audio Generation** - "Generating voiceover with TikTok TTS"
+7. **Music Addition** (if enabled) - "Adding background music"
+8. **Subtitle Generation** - "Generating subtitles"
+9. **Video Rendering** - "Rendering final video with subtitles..."
+10. **Completion** - "Video generation complete"
+
+## Polling for Events
+
+### Basic Polling
+
+```python
+import requests
+import time
+
+job_id = "abc-123"
+last_event_id = 0
+
+while True:
+    response = requests.get(
+        f"http://localhost:8080/api/jobs/{job_id}/events",
+        params={"after": last_event_id}
+    )
+    data = response.json()
+    
+    # Process new events
+    for event in data["events"]:
+        print(f"[{event['level'].upper()}] {event['message']}")
+        last_event_id = event["id"]
+    
+    # Check if job is complete
+    job_response = requests.get(f"http://localhost:8080/api/jobs/{job_id}")
+    if job_response.json()["job"]["state"] in ["completed", "failed", "cancelled"]:
+        break
+    
+    time.sleep(2)
+```
+
+### Filtering by Level
+
+```python
+# Only show warnings and errors
+for event in events:
+    if event["level"] in ["warning", "error"]:
+        print(f"[{event['level'].upper()}] {event['message']}")
+```
+
+### Progress Bar Integration
+
+```python
+from tqdm import tqdm
+
+progress_bar = tqdm(total=100, desc="Generating video")
+last_progress = 0
+
+for event in events:
+    if event["payload"] and "progress" in event["payload"]:
+        progress = int(event["payload"]["progress"] * 100)
+        progress_bar.update(progress - last_progress)
+        last_progress = progress
+    
+    if event["level"] == "info":
+        progress_bar.set_description(event["message"])
+```
+
+## Database Schema
+
+Events are stored in the `generation_events` table:
+
+```python
+class GenerationEvent(Base):
+    __tablename__ = "generation_events"
+    
+    id: Mapped[int]                    # Auto-incrementing ID
+    job_id: Mapped[str]                # Foreign key to generation_jobs
+    event_type: Mapped[str]            # "log" by default
+    level: Mapped[str]                 # "info", "success", "warning", "error"
+    message: Mapped[str]               # Human-readable message
+    payload: Mapped[Optional[dict]]    # Optional structured data
+    created_at: Mapped[datetime]       # Timestamp
+```
+
+See `~/workspace/source/Backend/models.py` lines 61-79 for the full definition.
+
+## Best Practices
+
+### Display Guidelines
+
+<Tip>
+  **Color Coding by Level**
+  
+  - `info` - White/gray (default)
+  - `success` - Green
+  - `warning` - Yellow/orange
+  - `error` - Red
+</Tip>
+
+### Performance Considerations
+
+- **Use incremental polling** with the `after` parameter to avoid fetching duplicate events
+- **Batch event processing** - Wait 1-2 seconds between polls to reduce API calls
+- **Stop polling terminal states** - Once a job reaches `completed`, `failed`, or `cancelled`, stop polling for events
+
+### Error Handling
+
+```python
+try:
+    response = requests.get(f"http://localhost:8080/api/jobs/{job_id}/events")
+    response.raise_for_status()
+except requests.exceptions.HTTPError as e:
+    if e.response.status_code == 404:
+        print("Job not found")
+    else:
+        print(f"Error fetching events: {e}")
+```
+
+## Frontend Integration Example
+
+From the MoneyPrinter frontend (`Frontend/script.js`):
+
+```javascript
+function pollForEvents(jobId, lastEventId = 0) {
+  fetch(`http://localhost:8080/api/jobs/${jobId}/events?after=${lastEventId}`)
+    .then(res => res.json())
+    .then(data => {
+      for (const event of data.events) {
+        // Add to event log display
+        appendEventToLog(event);
+        lastEventId = event.id;
+      }
+      
+      // Continue polling if job is still active
+      setTimeout(() => pollForEvents(jobId, lastEventId), 2000);
+    });
+}
+```

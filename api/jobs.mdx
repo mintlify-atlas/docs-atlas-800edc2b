@@ -1,0 +1,435 @@
+---
+title: Job Management
+description: Endpoints for monitoring and controlling video generation jobs
+---
+
+## GET /api/jobs/:id
+
+Retrieves the current status and metadata for a specific job.
+
+### Path Parameters
+
+<ParamField path="id" type="string" required>
+  The unique job identifier returned from `/api/generate`.
+</ParamField>
+
+### Response
+
+<ResponseField name="status" type="string">
+  Always `"success"` if the job exists.
+</ResponseField>
+
+<ResponseField name="job" type="object">
+  Job details object containing the following fields:
+  
+  <Expandable title="job properties">
+    <ResponseField name="id" type="string">
+      The job's unique identifier (UUID).
+    </ResponseField>
+    
+    <ResponseField name="state" type="string">
+      Current job state. One of: `queued`, `running`, `completed`, `failed`, `cancelled`.
+      
+      See [Job States](/api/job-states) for details.
+    </ResponseField>
+    
+    <ResponseField name="cancelRequested" type="boolean">
+      Whether cancellation has been requested for this job.
+    </ResponseField>
+    
+    <ResponseField name="resultPath" type="string | null">
+      File path to the generated video. Only present when `state` is `completed`.
+      
+      Example: `"/home/user/MoneyPrinter/output.mp4"`
+    </ResponseField>
+    
+    <ResponseField name="errorMessage" type="string | null">
+      Error description if `state` is `failed`. Otherwise `null`.
+    </ResponseField>
+    
+    <ResponseField name="createdAt" type="string | null">
+      ISO 8601 timestamp when the job was created.
+      
+      Example: `"2024-03-15T10:30:00.000Z"`
+    </ResponseField>
+    
+    <ResponseField name="startedAt" type="string | null">
+      ISO 8601 timestamp when the job started processing. `null` if still queued.
+    </ResponseField>
+    
+    <ResponseField name="completedAt" type="string | null">
+      ISO 8601 timestamp when the job finished (completed or failed). `null` if still in progress.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Example Request
+
+<CodeGroup>
+
+```bash cURL
+curl http://localhost:8080/api/jobs/a1b2c3d4-e5f6-7890-abcd-ef1234567890
+```
+
+```python Python
+import requests
+
+job_id = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+response = requests.get(f"http://localhost:8080/api/jobs/{job_id}")
+data = response.json()
+
+print(f"State: {data['job']['state']}")
+if data['job']['resultPath']:
+    print(f"Video: {data['job']['resultPath']}")
+```
+
+```javascript JavaScript
+const jobId = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
+const response = await fetch(`http://localhost:8080/api/jobs/${jobId}`);
+const data = await response.json();
+
+console.log(`State: ${data.job.state}`);
+if (data.job.resultPath) {
+  console.log(`Video: ${data.job.resultPath}`);
+}
+```
+
+</CodeGroup>
+
+### Example Response
+
+```json
+{
+  "status": "success",
+  "job": {
+    "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "state": "running",
+    "cancelRequested": false,
+    "resultPath": null,
+    "errorMessage": null,
+    "createdAt": "2024-03-15T10:30:00.000Z",
+    "startedAt": "2024-03-15T10:30:05.123Z",
+    "completedAt": null
+  }
+}
+```
+
+### Error Response
+
+```json
+{
+  "status": "error",
+  "message": "Job not found."
+}
+```
+
+HTTP Status: `404 Not Found`
+
+---
+
+## GET /api/jobs/:id/events
+
+Retrieves progress events for a specific job. Supports incremental polling by providing the last received event ID.
+
+### Path Parameters
+
+<ParamField path="id" type="string" required>
+  The unique job identifier.
+</ParamField>
+
+### Query Parameters
+
+<ParamField query="after" type="integer" default="0">
+  Return only events with an ID greater than this value. Used for incremental polling.
+  
+  Example: `after=42` returns events with ID 43, 44, 45, etc.
+</ParamField>
+
+### Response
+
+<ResponseField name="status" type="string">
+  Always `"success"` if the job exists.
+</ResponseField>
+
+<ResponseField name="events" type="array">
+  Array of event objects, ordered by creation time (oldest first).
+  
+  <Expandable title="event properties">
+    <ResponseField name="id" type="integer">
+      Unique event identifier. Use this value in the `after` query parameter for incremental polling.
+    </ResponseField>
+    
+    <ResponseField name="type" type="string">
+      Event type. Typically `"log"` for progress messages.
+      
+      See [Events](/api/events) for all event types.
+    </ResponseField>
+    
+    <ResponseField name="level" type="string">
+      Log level: `info`, `success`, `warning`, `error`.
+    </ResponseField>
+    
+    <ResponseField name="message" type="string">
+      Human-readable event message.
+      
+      Examples:
+      - `"Generating script..."`
+      - `"Searching for footage..."`
+      - `"Rendering video..."`
+    </ResponseField>
+    
+    <ResponseField name="payload" type="object | null">
+      Optional structured data associated with the event. Contents vary by event type.
+    </ResponseField>
+    
+    <ResponseField name="timestamp" type="number | null">
+      Unix timestamp (seconds since epoch) when the event was created.
+      
+      Example: `1710499800.123`
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Example Request
+
+<CodeGroup>
+
+```bash cURL
+# Get all events
+curl http://localhost:8080/api/jobs/a1b2c3d4-e5f6-7890-abcd-ef1234567890/events
+
+# Get events after ID 42
+curl http://localhost:8080/api/jobs/a1b2c3d4-e5f6-7890-abcd-ef1234567890/events?after=42
+```
+
+```python Python
+import requests
+import time
+
+job_id = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+last_event_id = 0
+
+# Poll for new events every 2 seconds
+while True:
+    response = requests.get(
+        f"http://localhost:8080/api/jobs/{job_id}/events",
+        params={"after": last_event_id}
+    )
+    data = response.json()
+    
+    for event in data["events"]:
+        print(f"[{event['level']}] {event['message']}")
+        last_event_id = event["id"]
+    
+    time.sleep(2)
+```
+
+```javascript JavaScript
+const jobId = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
+let lastEventId = 0;
+
+// Poll for new events every 2 seconds
+setInterval(async () => {
+  const response = await fetch(
+    `http://localhost:8080/api/jobs/${jobId}/events?after=${lastEventId}`
+  );
+  const data = await response.json();
+  
+  for (const event of data.events) {
+    console.log(`[${event.level}] ${event.message}`);
+    lastEventId = event.id;
+  }
+}, 2000);
+```
+
+</CodeGroup>
+
+### Example Response
+
+```json
+{
+  "status": "success",
+  "events": [
+    {
+      "id": 43,
+      "type": "log",
+      "level": "info",
+      "message": "Generating script...",
+      "payload": null,
+      "timestamp": 1710499805.123
+    },
+    {
+      "id": 44,
+      "type": "log",
+      "level": "success",
+      "message": "Script generated successfully",
+      "payload": {"wordCount": 250},
+      "timestamp": 1710499812.456
+    },
+    {
+      "id": 45,
+      "type": "log",
+      "level": "info",
+      "message": "Searching for footage...",
+      "payload": null,
+      "timestamp": 1710499813.789
+    }
+  ]
+}
+```
+
+### Error Response
+
+```json
+{
+  "status": "error",
+  "message": "Job not found."
+}
+```
+
+HTTP Status: `404 Not Found`
+
+---
+
+## POST /api/jobs/:id/cancel
+
+Requests cancellation of a specific job. The job will be cancelled gracefully at the next checkpoint.
+
+### Path Parameters
+
+<ParamField path="id" type="string" required>
+  The unique job identifier to cancel.
+</ParamField>
+
+### Response
+
+<ResponseField name="status" type="string">
+  `"success"` if cancellation was requested.
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Always `"Cancellation requested."`
+</ResponseField>
+
+### Example Request
+
+<CodeGroup>
+
+```bash cURL
+curl -X POST http://localhost:8080/api/jobs/a1b2c3d4-e5f6-7890-abcd-ef1234567890/cancel
+```
+
+```python Python
+import requests
+
+job_id = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+response = requests.post(f"http://localhost:8080/api/jobs/{job_id}/cancel")
+print(response.json()["message"])
+```
+
+```javascript JavaScript
+const jobId = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
+const response = await fetch(
+  `http://localhost:8080/api/jobs/${jobId}/cancel`,
+  { method: 'POST' }
+);
+const data = await response.json();
+console.log(data.message);
+```
+
+</CodeGroup>
+
+### Example Response
+
+```json
+{
+  "status": "success",
+  "message": "Cancellation requested."
+}
+```
+
+### Error Response
+
+```json
+{
+  "status": "error",
+  "message": "Job not found."
+}
+```
+
+HTTP Status: `404 Not Found`
+
+<Note>
+  Cancellation is not immediate. The job will be cancelled at the next safe checkpoint. Check the `cancelRequested` field in the job status to confirm the request was received.
+</Note>
+
+---
+
+## POST /api/cancel
+
+Cancels the latest active job (running or queued). Prioritizes running jobs over queued jobs.
+
+<Warning>
+  This endpoint cancels ANY active job, not a specific one. Use `POST /api/jobs/:id/cancel` to cancel a specific job.
+</Warning>
+
+### Response
+
+<ResponseField name="status" type="string">
+  `"success"` if a job was found and cancellation was requested.
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Always `"Cancellation requested."`
+</ResponseField>
+
+<ResponseField name="jobId" type="string">
+  The ID of the job that was cancelled.
+</ResponseField>
+
+### Example Request
+
+<CodeGroup>
+
+```bash cURL
+curl -X POST http://localhost:8080/api/cancel
+```
+
+```python Python
+import requests
+
+response = requests.post("http://localhost:8080/api/cancel")
+data = response.json()
+print(f"Cancelled job: {data['jobId']}")
+```
+
+```javascript JavaScript
+const response = await fetch('http://localhost:8080/api/cancel', {
+  method: 'POST'
+});
+const data = await response.json();
+console.log(`Cancelled job: ${data.jobId}`);
+```
+
+</CodeGroup>
+
+### Example Response
+
+```json
+{
+  "status": "success",
+  "message": "Cancellation requested.",
+  "jobId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+}
+```
+
+### Error Response
+
+```json
+{
+  "status": "error",
+  "message": "No active job found."
+}
+```
+
+HTTP Status: `404 Not Found`
