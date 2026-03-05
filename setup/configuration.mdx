@@ -26,6 +26,7 @@ PEXELS_API_KEY=""
 IMAGEMAGICK_BINARY=""
 OLLAMA_BASE_URL="http://localhost:11434"
 OLLAMA_MODEL="llama3.1:8b"
+OLLAMA_TIMEOUT="180"
 ASSEMBLY_AI_API_KEY=""
 
 # Database (Docker)
@@ -198,6 +199,30 @@ Recommended models:
 | `mistral:7b` | 4.1GB | Very Fast | Good | Quick iterations |
 | `llama3.1:70b` | 40GB | Slow | Excellent | Best quality (GPU required) |
 | `qwen2.5:7b` | 4.7GB | Fast | Good | Multilingual |
+
+### OLLAMA_TIMEOUT
+
+**Description**: Timeout in seconds for Ollama API requests.
+
+**Default**: `180` (3 minutes)
+
+```python Backend/gpt.py
+OLLAMA_TIMEOUT = float(os.getenv("OLLAMA_TIMEOUT", "180"))
+
+def _ollama_client() -> Client:
+    return Client(host=OLLAMA_BASE_URL, timeout=OLLAMA_TIMEOUT)
+```
+
+Increase this value if you're using large models that take longer to respond:
+
+```bash .env
+# For slower models or resource-constrained systems
+OLLAMA_TIMEOUT=300
+```
+
+<Tip>
+Large models (70B+) may require longer timeouts, especially on CPU-only systems.
+</Tip>
 
 ### ASSEMBLY_AI_API_KEY
 
