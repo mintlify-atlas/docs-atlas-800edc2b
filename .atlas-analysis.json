@@ -1,0 +1,118 @@
+{
+  "projectType": "ai-ml",
+  "projectName": "MoneyPrinter",
+  "projectDescription": "Automate the creation of YouTube Shorts using AI-powered script generation and video composition.",
+  "theme": "aspen",
+  "primaryColor": "#274498",
+  "lightColor": "#697ca6",
+  "darkColor": "#cce3e5",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Setup & Configuration",
+            "pages": [
+              "setup/installation",
+              "setup/configuration",
+              "setup/docker"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/architecture",
+              "concepts/job-queue",
+              "concepts/pipeline"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/generating-videos",
+              "guides/ollama-models",
+              "guides/background-music",
+              "guides/youtube-upload"
+            ]
+          },
+          {
+            "group": "Development",
+            "pages": [
+              "development/testing",
+              "development/troubleshooting"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "api/overview"
+            ]
+          },
+          {
+            "group": "Endpoints",
+            "pages": [
+              "api/generate",
+              "api/jobs",
+              "api/models",
+              "api/upload-songs"
+            ]
+          },
+          {
+            "group": "Data Models",
+            "pages": [
+              "api/job-states",
+              "api/events"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Pipeline Components",
+        "groups": [
+          {
+            "group": "Components",
+            "pages": [
+              "pipeline/script-generation",
+              "pipeline/video-search",
+              "pipeline/voice-synthesis",
+              "pipeline/video-composition",
+              "pipeline/subtitles"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Ollama-powered AI script generation",
+    "TikTok voice synthesis integration",
+    "Automated stock video search (Pexels)",
+    "MoviePy-based video composition",
+    "Database-backed job queue architecture",
+    "Docker deployment support",
+    "Optional YouTube upload automation",
+    "Real-time job progress tracking"
+  ],
+  "publicApiSurface": [
+    "POST /api/generate - Submit video generation job",
+    "GET /api/jobs/:id - Get job status",
+    "GET /api/jobs/:id/events - Get job events",
+    "POST /api/jobs/:id/cancel - Cancel job",
+    "POST /api/cancel - Cancel latest running job",
+    "GET /api/models - List available Ollama models",
+    "POST /api/upload-songs - Upload background music"
+  ]
+}
